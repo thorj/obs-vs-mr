@@ -20,3 +20,12 @@ export_image <- function(plot, fig_name, width, height, dpi = 300) {
     )
     invisible(path)
 }
+
+create_folder_structure <- function() {
+    ## Figures
+    figures_path <- file.path("figures", c("low_res", "high_res"))
+    for (p in figures_path) {
+        dir.create(p, recursive = TRUE, showWarnings = FALSE)
+    }
+    invisible(figures_path)
+}
