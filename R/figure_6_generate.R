@@ -1,11 +1,84 @@
-stan_data <- data_for_bayes$stan_data
+library(tidyverse)
+library(rstan)
+library(patchwork)
+library(Cairo)
+box::use(data.table[fread, fwrite])
+source("R/utils.R")
 
+### CONST
+other_lty <- 0
 
-bayes_res <- readRDS("data/stan-models/model_base_fstat_total_coding_proteincorr.rds")
+### Load data
+f <- fread("data/phenotype_overview.csv")
+obs <- fread("data/observational_results_full.csv")
+h1 <- fread("data/primary_mr_overview.csv")
+group <- readRDS("data/stan_map_pheno_to_group.rds")
+protein_map <-readRDS("data/stan_map_soma_to_egs.rds")
+stan_data <- readRDS("data/stan_agreement_model_data.rds")
+bayes_res <- readRDS("data/model_base_fstat_total_coding_proteincorr.rds")
 
 posterior_p <- 
     rstan::extract(bayes_res, 
                    pars = names(bayes_res)[grepl("^alpha$|alpha_p|gamma_g|beta_s|theta_f|theta_tc", names(bayes_res))])
+
+forward <-
+    obs |>
+    filter(obs_sig.mr == 1) |>
+    mutate(sig = as.integer(sign(beta) == sign(beta.mr))) |>
+    group_by(event) |>
+    summarize(n = n(), a = sum(sig), r = a/n) |>
+    mutate(rftext = paste0(a, " / ", n))
+
+fmissevent <- base::setdiff(obs$event, forward$event)
+
+forward_missing <-
+    obs |>
+    filter(event %in% fmissevent) |>
+    filter(has_cis == 1, p.bon < 0.05) |>
+    group_by(event) |>
+    mutate(mrfdr = p.adjust(pval.mr, "fdr", n())) |>
+    summarize(n = n(), a = sum(mrfdr < 0.05)) |>
+    mutate(r = 0,
+           rftext = "No significant forward hits")
+
+forward <- rbind(forward, forward_missing)
+
+
+reverse <-
+    obs |>
+    filter(p.bon < 0.05) |>
+    group_by(event) |>
+    mutate(fdr.rev = p.adjust(pval.rev.mr, "fdr", n())) |>
+    filter(fdr.rev < 0.05) |>
+    mutate(sig = as.integer(sign(beta) == sign(beta.rev.mr))) |>
+    summarize(n = n(), a = sum(sig), r = a/n) |>
+    mutate(rrtext = paste0(a, " / ", n))
+
+rmissevent <- base::setdiff(obs$event, reverse$event)
+
+reverse_missing <-
+    obs |>
+    filter(event %in% rmissevent) |>
+    filter(p.bon < 0.05) |>
+    group_by(event) |>
+    mutate(mrfdr = p.adjust(pval.rev.mr, "fdr", n())) |>
+    summarize(n = n(), a = sum(mrfdr < 0.05)) |>
+    mutate(r = 0,
+           rrtext = "No significant reverse hits")
+
+reverse <- rbind(reverse, reverse_missing)
+
+
+agreement <- 
+    full_join(forward |> select(event, rftext, rf = r), reverse |> select(event, rrtext, rr = r)) |>
+    ungroup() |>
+    mutate(rf = -rf) |>
+    arrange(rf) |> 
+    mutate(order = factor(row_number())) |>
+    mutate(rf = replace_na(rf, 0),
+           rr = replace_na(rr, 0)) |>
+    full_join(f |> select(-order)) |>
+    mutate(include = if_else(N == 0 & rr == 0, 0, 1))
 
 
 ## Helper function to get variable from posterior
@@ -65,7 +138,7 @@ q_t_p <- compute_tilde_q_p_full(posterior_p, group$groupf, L = 10000, P = stan_d
 
 q_t_p_df <- 
     h1 |> group_by(phenotype_id, event, groupf) |> count() |> select(-n) |>
-    inner_join(f2, by = join_by("event")) |>
+    inner_join(f |> filter(N > 0) |> mutate(r = Y/N), by = join_by("event")) |>  ### careful... any f |> filter(N > 0) might be wrong after update
     inner_join(data.frame(phenotype_id = 1:21, 
                           m = apply(q_t_p, MARGIN = 2, median),
                           q025 = apply(q_t_p, MARGIN = 2, quantile, probs = 0.025),
@@ -74,7 +147,7 @@ q_t_p_df <-
     ungroup() |>
     mutate(order = n() - row_number()) |>
     inner_join(
-        fread("tables/00b_no_obs_res.csv") |>
+        fread("data/00b_no_obs_res.csv") |>
             mutate(r_no_obs = total_agreef/total_mr_for) |>
             select(event, r_no_obs) 
     )
@@ -82,47 +155,6 @@ q_t_p_df <-
 
 global_mean <- rowMeans(q_t_p) |> median()
 global_q95 <- rowMeans(q_t_p) |> quantile(c(0.025, 0.975))
-
-pred_table <- 
-    q_t_p_df |>
-    select(trait, group, phenotype = phenotype2, event, N, obs_ratio = r, 
-           no_obs_ratio = r_no_obs, bayes_r = m, bayes_low = q025, bayes_high = q975) |>
-    mutate(global_median = global_mean,
-           global_low = global_q95[1], 
-           global_high = global_q95[2]) |>
-    inner_join(f2 |> select(event, order)) |>
-    arrange(order) |>
-    select(-order) |>    
-    mutate(across(where(is.numeric), ~round(.x, 2))) 
-
-
-pred_table2 <- 
-    pred_table |>
-    mutate(within_ci_obs = as.numeric(ifelse(obs_ratio >= bayes_low & obs_ratio <= bayes_high, 1, 0)),
-           within_ci_nobs = as.numeric(ifelse(no_obs_ratio >= bayes_low & no_obs_ratio <= bayes_high, 1, 0)),
-           within_glob_obs = as.numeric(ifelse(obs_ratio >= global_low & obs_ratio <= global_high, 1, 0)),
-           within_glob_nobs = as.numeric(ifelse(no_obs_ratio >= global_low & no_obs_ratio <= global_high, 1, 0)))
-
-pred_table2$within_glob_obs |> sum(na.rm = T)
-
-pred_table2 |> filter(within_glob_nobs != 1)
-
-write_csv(x = pred_table2, file = "tables/tables_new/predicted_ratios.csv")
-
-## no_obs_filter
-q_t_p_df |> select(phenotype2, m, q025, q975, r, r_no_obs) |> print(n=50)
-
-q_t_p_df |> select(phenotype2, m, q025, q975, r, r_no_obs) |>
-    filter(r >= global_q95[1] & r <= global_q95[2])
-
-q_t_p_df |> select(phenotype2, m, q025, q975, r, r_no_obs) |>
-    filter(r_no_obs >= global_q95[1] & r_no_obs <= global_q95[2])
-
-q_t_p_df |> select(phenotype2, m, q025, q975, r, r_no_obs) |>
-    filter(r_no_obs >= q025 & r_no_obs <= q975)
-
-q_t_p_df |> select(phenotype2, m, q025, q975, r, r_no_obs) |>
-    filter(r < q025 | r > q975)
 
 qt_area <- 
     data.frame(order2 = c(0.5, 22))
@@ -137,20 +169,12 @@ hibayes_plt <-
     ggplot(aes(x = order2)) +
     geom_ribbon(data = qt_area, aes(x = order2, ymin = global_q95[1], ymax = global_q95[2]), fill = "gray30", alpha = 0.2) +
     geom_hline(yintercept = global_mean, lty = 2, alpha = 0.5) +
-    # geom_hline(yintercept = global_q95[1], lty = 2, alpha = 0.5) +
-    # geom_hline(yintercept = global_q95[2], lty = 2, alpha = 0.5) +
-    # geom_crossbar(aes(y = m,
-    #                   ymin = q025, 
-    #                   ymax = q975), 
-    #               middle.linetype = "blank",
-    #               width = 0.6, 
-    #               alpha = 0.6) +
     geom_point(aes(y = m, color = "Predicted agreement", shape = "Predicted agreement"), size = point_size) +
     geom_errorbar(aes(ymin = q025, ymax = q975), width = 0.1) +
     geom_point(aes(y = r, color = "Observed agreement (Primary)", shape = "Observed agreement (Primary)"), size = point_size) +
     geom_point(aes(y = r_no_obs, color = "Observed agreement (Secondary)", shape = "Observed agreement (Secondary)"), size = point_size) +
     scale_y_continuous(breaks = 0:10/10, labels = scales::percent) +
-    scale_x_discrete(labels = q_t_p_df$phenotype2) +
+    scale_x_discrete(labels = q_t_p_df$phenotype) +
     scale_color_manual(
         name = NULL,
         values = c("Predicted agreement" = "black", 
@@ -166,18 +190,9 @@ hibayes_plt <-
     labs(x = "", y = "Agreement ratio") +
     theme_bw(base_size = 12) +
     theme(axis.title = element_text(face = "bold"), legend.position = "bottom") +
-    coord_flip() #+
-# guides(
-#     color = guide_legend(nrow = 2, order = 1,
-#                         title = "",
-#                         theme = theme(legend.key.spacing.y = unit(0, "cm"),
-#                                       legend.margin = margin())),
-#     shape = guide_legend(nrow = 2, title = "", order = 1,
-#                          theme = theme(legend.key.spacing.y = unit(0, "cm"),
-#                                        legend.margin = margin()))
-# )
+    coord_flip()
 
-hibayes_plt
+#hibayes_plt
 
 #### Posterior density
 ## Start with posterior distribution of tc
@@ -214,31 +229,12 @@ tc_post <-
 
 
 agreement_plots <-
-    #((observed_agreement | tc_post) / hibayes_plt) +
     free(tc_post, side = "l") + hibayes_plt +
     plot_annotation(tag_levels = "A", tag_prefix = "Fig. ") &
     theme(plot.tag.position = c(0, 1),
           plot.tag = element_text(size = 12, hjust = 0, vjust = 0))
-ggsave(filename = "img/highres/figure4_agreement_ratios_posterior.pdf", 
-       plot = agreement_plots, 
-       width = 18, height = 6, device = cairo_pdf)
 
-ggsave(filename = "img/lowres/figure4_agreement_ratios_posterior.png", 
-       plot = agreement_plots, 
-       width = 18, height = 6, dpi = 300)
+export_image(plot = agreement_plots, fig_name = "figure6_agreement_ratios_posterior", width = 18, height = 6, dpi = 300)
 
-ggsave(filename = "img/highres/figure4_agreement_ratios.pdf", 
-       plot = observed_agreement, 
-       width = 12, height = 7, device = cairo_pdf)
+#fwrite(x = q_t_p_df, file = "tables/raw-tables/predicted_ratios_phenotypes.csv")
 
-ggsave(filename = "img/lowres/figure4_agreement_ratios.png", 
-       plot = observed_agreement, 
-       width = 12, height = 7, dpi = 300)
-
-#ggsave(filename = "img/highres/figure4_predicted_ratio_agree.pdf", plot = hibayes_plt, width = 12, height = 8, device = cairo_pdf)
-
-fwrite(x = q_t_p_df, file = "tables/raw-tables/predicted_ratios_phenotypes.csv")
-
-
-### coding variant
-posterior_p$theta_tc |> quantile(probs = c(0.025, 0.5, 0.975))
