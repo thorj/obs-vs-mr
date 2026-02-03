@@ -6,34 +6,8 @@ box::use(data.table[fread, fwrite])
 ### Load data
 data_for_bayes <- readRDS(file = "data/data_for_analysis.rds")
 f <- data_for_bayes$f
-f2 <- data_for_bayes$f2
-group <- data_for_bayes$map_phenotype_to_group
-protein_map <- data_for_bayes$map_somamer_to_egs
-
 obs <- fread("../../papers/02_obs_vs_mr/data/observational_results_full.csv")
-
-## Onto coding and instruments
 harmon <- fread("../../papers/02_obs_vs_mr/data/forward_mr_harmonized.csv")
-harmon_snps <- harmon$snp_id |> unique() |> sort()
-
-dbsnp <- readRDS("data-raw/view_snp_info.rds")
-dbsnp <- 
-    dbsnp |> 
-    select(snp_id, 
-           coding_variant) |> 
-    filter(snp_id %in% harmon_snps) |>
-    group_by(snp_id) |> 
-    filter(row_number() == 1) |> 
-    ungroup()
-
-## hetero
-get_dosages <- 
-    harmon |>
-    inner_join(h1 |> select(gwas, somamer)) |>
-    pull(snp_id) |>
-    unique() |> sort()
-
-saveRDS(object = get_dosages, file = "data-raw/dosages_for_forward_mr_snp_ids.rds")
 
 matched_ids <- data.table::fread("data-raw/old_id_to_new_id.csv") |>
     rename(new_db_snpid = snp_id,
@@ -69,11 +43,6 @@ forward_harmon_multi <-
     forward_harmon |> 
     filter(!is.nan(se_beta_hat)) |>
     group_by(gwas, somamer) |> filter(n() > 1) |> ungroup()
-
-dosages <- readRDS("data-raw/dosages_from_database.rds")
-genotype_matrix <- dosages$dosages
-soma_pheno_pairs <- forward_harmon_multi |> distinct(gwas, somamer)
-model <- stan_model("stan/heterogeneity/snp_heterogeneity.stan")
 
 hetergen_test <- function(i, pair_data, snp_data, dosage_matrix, model) {
     print(i)
@@ -114,6 +83,10 @@ hetergen_test <- function(i, pair_data, snp_data, dosage_matrix, model) {
     saveRDS(object = posterior_fit, file = save_path)
 }
 
+model <- stan_model("stan/heterogeneity/snp_heterogeneity.stan")
+dosages <- readRDS("data-raw/dosages_from_database.rds")
+genotype_matrix <- dosages$dosages
+soma_pheno_pairs <- forward_harmon_multi |> distinct(gwas, somamer)
 res <- 
     lapply(1:nrow(soma_pheno_pairs), 
            hetergen_test, 
