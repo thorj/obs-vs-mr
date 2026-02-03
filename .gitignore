@@ -2,4 +2,6 @@
 .Rhistory
 .RData
 .Ruserdata
-_data_raw_true/
+data_raw_true/
+data/
+data_raw/
