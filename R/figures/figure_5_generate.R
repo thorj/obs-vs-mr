@@ -53,7 +53,9 @@ gd_plt <-
     geom_label_repel(aes(color = any_coding, label = n), size = 3) +
     scale_color_manual(values = c("#648FFF", "#FFB000")) +
     scale_x_continuous(breaks = 0:10/10, labels = scales::percent) +
-    labs(x = "Agreement ratio", y = "", color = "Contains coding variant", shape = "Contains coding variant") +
+    labs(x = "Agreement ratio", y = "", 
+         color = "Contains coding variant", 
+         shape = "Contains coding variant") +
     coord_cartesian(xlim = c(0, 1)) +
     theme_bw(base_size = 12) +
     theme(legend.position = "bottom",
@@ -82,22 +84,23 @@ pd_plt <-
     geom_label_repel(aes(color = any_coding, label = n), size = 3) +
     scale_color_manual(values = c("#648FFF", "#FFB000")) +
     scale_x_continuous(breaks = 0:10/10, labels = scales::percent) +
-    labs(x = "Agreement ratio", y = "", color = "Contains coding variant", shape = "Contains coding variant") +
+    labs(x = "Agreement ratio", 
+         y = "", 
+         color = "Contains coding variant", 
+         shape = "Contains coding variant") +
     theme_bw(base_size = 12) +
     theme(legend.position = "bottom",
           axis.title = element_text(face = "bold"))
 
 finalp <-
-    (gd_plt |  pd_plt | hmf_agree_cod) + plot_annotation(tag_levels = "A", tag_prefix = "Fig. ")
+    (gd_plt |  pd_plt | hmf_agree_cod) + 
+    plot_annotation(tag_levels = "A", tag_prefix = "Fig. ")
 
-export_image(plot = finalp, fig_name = "figure5_coding_vs_covars", width = 20, height = 6, dpi = 300)
-
-
-
-#ggsave(filename = "img/highres/figure6_coding_vs_covars.pdf", plot = finalp, width = 20, height = 6)
-ggsave(filename = "img/lowres/figure6_coding_vs_covars.png", plot = finalp, width = 20, height = 6, dpi = 300)
+export_image(plot = finalp, 
+             fig_name = "figure5_coding_vs_covars",
+             width = 20, height = 6, dpi = 300)
 
 ## Export tables
-fwrite(x = group_dumb |> select(-groupf), file = "tables/tables_new/figure6A_table.csv")
-fwrite(x = pheno_dumb, file = "tables/tables_new/figure6B_table.csv")
-fwrite(x = hmf_df, file = "tables/tables_new/figure6C_table.csv")
+#fwrite(x = group_dumb |> select(-groupf), file = "tables/tables_new/figure6A_table.csv")
+#fwrite(x = pheno_dumb, file = "tables/tables_new/figure6B_table.csv")
+#fwrite(x = hmf_df, file = "tables/tables_new/figure6C_table.csv")

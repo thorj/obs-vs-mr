@@ -11,53 +11,43 @@ obs <- fread("data/observational_results_full.csv")
 other_lty <- 0
 ####
 
-sig_df <-
-    obs |>
-    filter(p.bon < 0.05) |>
-    group_by(event) |>
-    summarize(n = n()) |>
-    mutate(p = n/7288) |>
-    inner_join(f) |>
-    arrange(p) |>
-    ungroup() |>
-    mutate(order2 = row_number(),
-           order2 = factor(order2))
+sig_df <- fread("data/reoccurring_data/bonferroni_sig_obs.csv")
 
 sig_pan <- 
     sig_df |>
     ggplot(aes(x = order2, y = n)) +
-    geom_col(aes(fill = trait, linetype = trait), color = "black", alpha = 0.6) + 
-    scale_y_continuous(breaks = scales::extended_breaks(n = 10), limits = c(0, 4500)) +
+    geom_col(aes(fill = trait, linetype = trait),
+             color = "black", alpha = 0.6) + 
+    scale_y_continuous(breaks = scales::extended_breaks(n = 10), 
+                       limits = c(0, 4500)) +
     scale_x_discrete(labels = sig_df$phenotype) +
-    #scale_fill_manual(values = c("Disease" = "#882255", "Risk factor" = "#332288")) +
-    scale_fill_manual(values = c("Disease" = "#1E88E5", "Risk factor" = "orange"), drop = T) +
-    scale_linetype_manual(values = c("Disease" = 1, "Risk factor" = other_lty)) + ## <-linetype
+    scale_fill_manual(values = c("Disease" = "#1E88E5", 
+                                 "Risk factor" = "orange"), 
+                      drop = T) +
+    scale_linetype_manual(values = c("Disease" = 1, 
+                                     "Risk factor" = other_lty)) +
     geom_label(aes(label = n), size = 3, hjust = -0.1) +
     coord_flip() +
-    labs(x = "", y = "Number of phenotype-level significant SOMAmers", fill = "", linetype = "") +
+    labs(x = "", 
+         y = "Number of phenotype-level significant SOMAmers", 
+         fill = "", linetype = "") +
     theme_bw(base_size = 12) +
     theme(axis.title = element_text(face = "bold"),
           legend.position = "bottom")
 
-sig_pan
-### cis
-prop_w_cis <- 
-    obs |> 
-    filter(has_cis == 1) |> 
-    pull(somamer) |>
-    unique() |> 
-    length() / 7288
-cis_df <-
-    obs |>
-    filter(p.bon < 0.05) |>
-    group_by(event) |>
-    summarize(n = n(), ciss = sum(has_cis)) |>
-    mutate(p = ciss/n) |>
-    inner_join(f) |>
-    ungroup() |>
-    inner_join(sig_df |> select(event, order2)) |>
-    arrange(order2)
+### cis info
+cis_info <- readRDS("data/reoccurring_data/cis_protein_data.rds")
+prop_w_cis <- cis_info$overall_cis_prop
+cis_df <- cis_info$bonferroni_with_cis
+has_cis <- cis_info$has_cis
 
+background_df <- data.frame(
+    xmin = as.numeric(levels(has_cis$order)) - 0.5,
+    xmax = as.numeric(levels(has_cis$order)) + 0.5,
+    ymin = -Inf,
+    ymax = Inf,
+    fill = rep(c("grey90", "white"), length.out = length(levels(has_cis$order)))
+)
 
 cis_pan <- 
     cis_df |>
@@ -68,7 +58,6 @@ cis_pan <-
     scale_y_continuous(labels = scales::percent, breaks = 0:20/20, limits = c(0, 0.75)) +
     scale_x_discrete(labels = cis_df$phenotype) +
     scale_fill_manual(values = c("Disease" = "#1E88E5", "Risk factor" = "orange"), drop = T) +
-    #scale_fill_manual(values = c("Disease" = "#882255", "Risk factor" = "#332288")) +
     scale_linetype_manual(values = c("Disease" = 1, "Risk factor" = other_lty)) +
     geom_label(aes(label = ln), size = 3, hjust = -0.1) +
     coord_flip() +
@@ -77,63 +66,7 @@ cis_pan <-
     theme(axis.title = element_text(face = "bold"),
           legend.position = "bottom")
 
-### total fdr significant
-forwardsig <-
-    obs |>
-    filter(p.bon < 0.05, has_cis == 1) |>
-    group_by(event) |>
-    mutate(fdr = p.adjust(pval.mr, "fdr", n())) |>
-    summarize(n = n(), a = sum(fdr < 0.05), r = a/n) |>
-    mutate(rftext = paste0(a, " / ", n))
-
-reversesig <-
-    obs |>
-    filter(p.bon < 0.05) |>
-    group_by(event) |>
-    mutate(fdr.rev = p.adjust(pval.rev.mr, "fdr", n())) |>
-    summarize(n = n(), a = sum(fdr.rev < 0.05), r = a/n) |>
-    mutate(rrtext = paste0(a, " / ", n))
-
-agreementsig <- 
-    full_join(forwardsig |> select(event, rftext, rf = r), reversesig |> select(event, rrtext, rr = r)) |>
-    mutate(rf = -rf) |>
-    #select(-c("rftext", "rrtext")) |>
-    arrange(rf) |>
-    mutate(order = factor(row_number())) |>
-    mutate(rf = replace_na(rf, 0),
-           rr = replace_na(rr, 0)) |>
-    #filter(!(rr == 0 & rf == 0)) |>
-    full_join(f |> select(-order, -N, -Y))
-
-
-
-### adding 
-has_cis <-
-    obs |>
-    filter(p.bon < 0.05) |>
-    group_by(event) |>
-    summarize(n = n(), 
-              nc = sum(has_cis == 1),
-              m = mean(has_cis),
-              s = sd(has_cis)) |>
-    ungroup() |>
-    arrange(desc(m)) |>
-    mutate(order = row_number(),
-           order = factor(order),
-           ne = floor(0.28 * n)) |>
-    mutate(label = paste0(nc, "/", n)) |>
-    inner_join(cis_df |> select(event, phenotype, order2, trait)) |>
-    arrange(order2)
-
-background_df <- data.frame(
-    xmin = as.numeric(levels(has_cis$order2)) - 0.5,
-    xmax = as.numeric(levels(has_cis$order2)) + 0.5,
-    ymin = -Inf,
-    ymax = Inf,
-    fill = rep(c("grey90", "white"), length.out = length(levels(has_cis$order)))
-)
-
-#### Bonferroni tail enrichment
+### Bonferroni tail enrichment
 tail_res <-
     lapply(obs$event |> unique(),
            FUN = function(x) {
@@ -196,7 +129,6 @@ cis_tail <-
     geom_hline(yintercept = 0, lty = 2) +
     scale_y_continuous(labels = scales::number, breaks = scales::pretty_breaks(n = 7)) +
     scale_x_discrete(labels = has_cis$phenotype) +
-    #scale_fill_manual(values = c("Disease" = "#882255", "Risk factor" = "#332288"), drop = T) +
     scale_fill_manual(values = c("Disease" = "#1E88E5", "Risk factor" = "orange"), drop = T) +
     scale_shape_manual(values = c("P ≥ 0.05" = 1, "P < 0.05" = 16)) +
     scale_linetype_manual(values = c("Disease" = 1, "Risk factor" = other_lty)) +
@@ -233,4 +165,6 @@ subpan_1 <- (sig_pan | cis_pan | free(cis_tail)) +
     theme(plot.tag.position = c(0, 1),
           plot.tag = element_text(size = 12, hjust = 0, vjust = 0))
 
-export_image(plot = subpan_1, fig_name = "figure2_obs_and_cis", width = 15, height = 12, dpi = 300)
+export_image(plot = subpan_1, 
+             fig_name = "figure2_obs_and_cis", 
+             width = 15, height = 12, dpi = 300)

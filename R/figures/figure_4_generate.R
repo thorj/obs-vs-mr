@@ -61,7 +61,8 @@ reverse <- rbind(reverse, reverse_missing)
 
 
 agreement <- 
-    full_join(forward |> select(event, rftext, rf = r), reverse |> select(event, rrtext, rr = r)) |>
+    full_join(forward |> select(event, rftext, rf = r),
+              reverse |> select(event, rrtext, rr = r)) |>
     ungroup() |>
     mutate(rf = -rf) |>
     arrange(rf) |> 
@@ -77,7 +78,8 @@ observed_agreement <-
     filter(include == 1) |>
     ggplot(aes(x = order)) +
     geom_col(aes(y = rf, fill = "Forward MR"), alpha = 0.6, color = "black") +
-    geom_col(aes(y = rr, fill = "Reverse MR"), lty = other_lty, alpha = 0.6, color = "black") +
+    geom_col(aes(y = rr, fill = "Reverse MR"), 
+             lty = other_lty, alpha = 0.6, color = "black") +
     geom_hline(yintercept = 0, lty = 1) +
     geom_hline(yintercept = -0.5, lty = 2, alpha = 0.7) +
     geom_hline(yintercept = 0.5, lty = 2, alpha = 0.7) +
@@ -87,7 +89,8 @@ observed_agreement <-
     scale_x_discrete(label = agreement$phenotype) +
     scale_y_continuous(labels = function(x) scales::percent(abs(x)),
                        breaks = -10:10/10) +
-    scale_fill_manual(values = c("Forward MR" = "#882255", "Reverse MR" = "#332288"), drop = F) +
+    scale_fill_manual(values = c("Forward MR" = "#882255",
+                                 "Reverse MR" = "#332288"), drop = F) +
     coord_flip(ylim = c(-1.05, 1.15)) +
     theme_bw(base_size = 12) +
     theme(axis.title = element_text(face = "bold"),
@@ -95,4 +98,6 @@ observed_agreement <-
           legend.box = "verticle",
           legend.margin = margin())
 
-export_image(plot = observed_agreement, fig_name = "figure4_agreement_ratios", width = 12, height = 7, dpi = 300)
+export_image(plot = observed_agreement, 
+             fig_name = "figure4_agreement_ratios", 
+             width = 12, height = 7, dpi = 300)

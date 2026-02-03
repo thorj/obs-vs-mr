@@ -10,50 +10,14 @@ obs <- fread("data/observational_results_full.csv")
 ### CONST
 other_lty <- 0
 
-sig_df <-
-    obs |>
-    filter(p.bon < 0.05) |>
-    group_by(event) |>
-    summarize(n = n()) |>
-    mutate(p = n/7288) |>
-    inner_join(f) |>
-    arrange(p) |>
-    ungroup() |>
-    mutate(order2 = row_number(),
-           order2 = factor(order2))
+sig_df <- fread("data/reoccurring_data/bonferroni_sig_obs.csv")
 
-### total fdr significant
-forwardsig <-
-    obs |>
-    filter(p.bon < 0.05, has_cis == 1) |>
-    group_by(event) |>
-    mutate(fdr = p.adjust(pval.mr, "fdr", n())) |>
-    summarize(n = n(), a = sum(fdr < 0.05), r = a/n) |>
-    mutate(rftext = paste0(a, " / ", n))
-
-reversesig <-
-    obs |>
-    filter(p.bon < 0.05) |>
-    group_by(event) |>
-    mutate(fdr.rev = p.adjust(pval.rev.mr, "fdr", n())) |>
-    summarize(n = n(), a = sum(fdr.rev < 0.05), r = a/n) |>
-    mutate(rrtext = paste0(a, " / ", n))
-
-agreementsig <- 
-    full_join(forwardsig |> select(event, rftext, rf = r), reversesig |> select(event, rrtext, rr = r)) |>
-    mutate(rf = -rf) |>
-    #select(-c("rftext", "rrtext")) |>
-    arrange(rf) |>
-    mutate(order = factor(row_number())) |>
-    mutate(rf = replace_na(rf, 0),
-           rr = replace_na(rr, 0)) |>
-    #filter(!(rr == 0 & rf == 0)) |>
-    full_join(f |> select(-order, -N, -Y))
+### Primary MR significance
+primary_mr_significant <- readRDS("data/reoccurring_data/primary_mr_significant.rds")
+primary_mr_significant <- primary_mr_significant$primary_mr_significant
 
 fdr_sig <-
-    agreementsig |>
-    # mutate(rrtext = ifelse(rr == 0, NA, rrtext),
-    #        rftext = ifelse(rf == 0, NA, rftext)) |>
+    primary_mr_significant |>
     ggplot(aes(x = order)) +
     geom_col(aes(y = rf, fill = "Forward MR"), alpha = 0.6, color = "black") +
     geom_col(aes(y = rr, fill = "Reverse MR"), lty = other_lty, alpha = 0.6, color = "black") +
@@ -61,7 +25,7 @@ fdr_sig <-
     geom_label(aes(y = rf, label = rftext), size = 3, hjust = 1.1) +
     geom_label(aes(y = rr, label = rrtext), size = 3, hjust = -0.1) +
     labs(y = "Proportion of MR significant SOMAmers", x = "", fill = "") +
-    scale_x_discrete(label = agreementsig$phenotype) +
+    scale_x_discrete(label = primary_mr_significant$phenotype) +
     scale_y_continuous(labels = function(x) scales::percent(abs(x)),
                        breaks = -10:10/10) +
     scale_fill_manual(values = c("Forward MR" = "#882255", "Reverse MR" = "#332288"), drop = F) +
@@ -73,34 +37,12 @@ fdr_sig <-
           legend.margin = margin())
 
 ## same plot but do it for secondary analysis
-allcis_fdrsig <-
-    obs |>
-    filter(has_cis == 1) |>
-    group_by(event) |>
-    mutate(fdrnew = p.adjust(pval.mr, "fdr", n())) |>
-    summarize(n = n(), a = sum(fdrnew < 0.05), r = a/n) |>
-    mutate(rftext = paste0(a, " / ", n))
-
-allrev_fdrsig <-
-    obs |>
-    group_by(event) |>
-    mutate(fdrnew = p.adjust(pval.rev.mr, "fdr", n())) |>
-    summarize(n = n(), a = sum(fdrnew < 0.05), r = a/n) |>
-    mutate(rrtext = paste0(a, " / ", n)) 
-
-agreementsecsig <- 
-    full_join(allcis_fdrsig |> select(event, rftext, rf = r), allrev_fdrsig |> select(event, rrtext, rr = r)) |>
-    mutate(rf = -rf) |>
-    inner_join(agreementsig |> select(event, order)) |>
-    mutate(rf = replace_na(rf, 0),
-           rr = replace_na(rr, 0)) |>
-    full_join(f |> select(-order, -N, -Y)) |>
-    arrange(order)
+## Secondary MR significance
+secondary_mr_significant <- readRDS("data/reoccurring_data/secondary_mr_significant.rds")
+secondary_mr_significant <- secondary_mr_significant$secondary_mr_significant
 
 fdr_sec_sig <-
-    agreementsecsig |>
-    # mutate(rrtext = ifelse(rr == 0, NA, rrtext),
-    #        rftext = ifelse(rf == 0, NA, rftext)) |>
+    secondary_mr_significant |>
     ggplot(aes(x = order)) +
     geom_col(aes(y = rf, fill = "Forward MR"), alpha = 0.6, color = "black") +
     geom_col(aes(y = rr, fill = "Reverse MR"), lty = other_lty, alpha = 0.6, color = "black") +
@@ -108,8 +50,7 @@ fdr_sec_sig <-
     geom_label(aes(y = rf, label = rftext), size = 3, hjust = 1.1) +
     geom_label(aes(y = rr, label = rrtext), size = 3, hjust = -0.1) +
     labs(y = "Proportion of MR significant SOMAmers", x = "", fill = "") +
-    scale_x_discrete(label = agreementsecsig$phenotype) +
-    #scale_x_discrete(label = NULL) +
+    scale_x_discrete(label = secondary_mr_significant$phenotype) +
     scale_y_continuous(labels = function(x) scales::percent(abs(x)),
                        breaks = -10:10/20) +
     scale_fill_manual(values = c("Forward MR" = "#882255", "Reverse MR" = "#332288"), drop = F) +
@@ -119,6 +60,8 @@ fdr_sec_sig <-
           legend.position = "bottom",
           legend.box = "verticle",
           legend.margin = margin())
+
+### LOWER PANEL
 
 noobs <- 
     obs |>
@@ -167,13 +110,10 @@ fisher_anno <-
            event = term) |>
     select(term, estimate2, event)  |>
     inner_join(fisher_test_on_bad |> select(-fisher_est)) |>
-    inner_join(agreementsig |> select(order, event, phenotype, trait), by = join_by("event")) |>
+    inner_join(primary_mr_significant |> select(order, event, phenotype, trait), by = join_by("event")) |>
     mutate(pp = round(fisher_p, 2),
            label = paste0("FET P-value: ", pp)) |>
     select(event, order, trait, label, estimate2)
-
-
-
 
 mrsig_df <-
     mrsig_res |>
@@ -181,7 +121,7 @@ mrsig_df <-
            conf.low = estimate2 - 1.96 * std.error,
            conf.high = estimate2 + 1.96 * std.error) |>
     rename(event = term) |>
-    inner_join(agreementsig |> select(order, event, phenotype, trait), by = join_by("event")) |>
+    inner_join(primary_mr_significant |> select(order, event, phenotype, trait), by = join_by("event")) |>
     arrange(order) |>
     mutate(sig = if_else(p.value < 0.05, 1, 0),
            sig = factor(sig, levels = c(0, 1), labels = c("P ≥ 0.05", "P < 0.05")))
@@ -206,39 +146,11 @@ mr_sig_table <-
 
 #fwrite(x = mr_sig_table, file = "tables/tables_new/results_mr_forward_sig_enrichment_in_tail.csv")
 
-### adding 
-prop_w_cis <- 
-    obs |> 
-    filter(has_cis == 1) |> 
-    pull(somamer) |>
-    unique() |> 
-    length() / 7288
-cis_df <-
-    obs |>
-    filter(p.bon < 0.05) |>
-    group_by(event) |>
-    summarize(n = n(), ciss = sum(has_cis)) |>
-    mutate(p = ciss/n) |>
-    inner_join(f) |>
-    ungroup() |>
-    inner_join(sig_df |> select(event, order2)) |>
-    arrange(order2)
-has_cis <-
-    obs |>
-    filter(p.bon < 0.05) |>
-    group_by(event) |>
-    summarize(n = n(), 
-              nc = sum(has_cis == 1),
-              m = mean(has_cis),
-              s = sd(has_cis)) |>
-    ungroup() |>
-    arrange(desc(m)) |>
-    mutate(order = row_number(),
-           order = factor(order),
-           ne = floor(0.28 * n)) |>
-    mutate(label = paste0(nc, "/", n)) |>
-    inner_join(cis_df |> select(event, phenotype, order2, trait)) |>
-    arrange(order2)
+### cis info
+cis_info <- readRDS("data/reoccurring_data/cis_protein_data.rds")
+prop_w_cis <- cis_info$overall_cis_prop
+cis_df <- cis_info$bonferroni_with_cis
+has_cis <- cis_info$has_cis
 
 background_df <- data.frame(
     xmin = as.numeric(levels(has_cis$order2)) - 0.5,
@@ -351,7 +263,7 @@ mrsig_plot2_df <-
            conf.low = estimate2 - 1.96 * std.error,
            conf.high = estimate2 + 1.96 * std.error) |>
     rename(event = term) |>
-    inner_join(agreementsig |> select(order, event, phenotype, trait), by = join_by("event")) |>
+    inner_join(primary_mr_significant |> select(order, event, phenotype, trait), by = join_by("event")) |>
     arrange(order) |>
     mutate(sig = if_else(p.value < 0.05, 1, 0),
            sig = factor(sig, levels = c(0, 1), labels = c("P ≥ 0.05", "P < 0.05")))
@@ -396,7 +308,7 @@ fisher_secanno <-
     mutate(estimate2 = -Inf) |>
     select(estimate2, event)  |>
     left_join(fisher_secanal) |>
-    inner_join(agreementsig |> select(order, event, phenotype, trait), by = join_by("event")) |>
+    inner_join(primary_mr_significant |> select(order, event, phenotype, trait), by = join_by("event")) |>
     mutate(pp = round(fisher_p, 2),
            label = if_else(is.na(fisher_p),
                            "No significant hits",
@@ -458,8 +370,6 @@ mr_rev_sig_table <-
 
 #fwrite(x = mr_rev_sig_table, file = "tables/tables_new/results_mr_reverse_sig_enrichment_in_tail.csv")
 
-
-
 mr_sig_table <-
     f |> 
     select(trait, group, phenotype, event) |>
@@ -512,13 +422,18 @@ mrsig_2 <-
                             title = "",
                             theme = theme(legend.key.spacing.y = unit(0, "cm"),
                                           legend.margin = margin())),
-        shape = guide_legend(nrow = 2, title = "", order = 2,
+        shape = guide_legend(nrow = 2, 
+                             title = "", 
+                             order = 2,
                              theme = theme(legend.key.spacing.y = unit(0, "cm"),
                                            legend.margin = margin())),
-        linetype = guide_legend(nrow = 2, title = "", order = 1,
-                                theme = theme(legend.key.spacing.y = unit(0, "cm"),
-                                              legend.margin = margin()))
-    ) +
+        linetype = guide_legend(nrow = 2, 
+                                title = "", 
+                                order = 1,
+                                theme = theme(
+                                    legend.key.spacing.y = unit(0,"cm"),
+                                    legend.margin = margin()))
+        ) +
     labs(x = "", 
          y = "Log-odds ratio", 
          linetype = "") +
@@ -533,7 +448,6 @@ subpan_3 <-
     theme(plot.tag.position = c(0, 1),
           plot.tag = element_text(size = 12, hjust = 0, vjust = 0))
 
-export_image(plot = subpan_3, fig_name = "figure3_mr_res_all", width = 18, height = 12, dpi = 300)
-
-ggsave(filename = "img/highres/figure3_mr_res_all.pdf", plot = subpan_3, width = 18, height = 12, device = cairo_pdf)
-ggsave(filename = "img/lowres/figure3_mr_res_all.png", plot = subpan_3, width = 18, height = 12, dpi = 300)
+export_image(plot = subpan_3,
+             fig_name = "figure3_mr_res_all", 
+             width = 18, height = 12, dpi = 300)

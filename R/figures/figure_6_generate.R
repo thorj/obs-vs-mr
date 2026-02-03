@@ -43,7 +43,6 @@ forward_missing <-
 
 forward <- rbind(forward, forward_missing)
 
-
 reverse <-
     obs |>
     filter(p.bon < 0.05) |>
@@ -70,7 +69,8 @@ reverse <- rbind(reverse, reverse_missing)
 
 
 agreement <- 
-    full_join(forward |> select(event, rftext, rf = r), reverse |> select(event, rrtext, rr = r)) |>
+    full_join(forward |> select(event, rftext, rf = r),
+              reverse |> select(event, rrtext, rr = r)) |>
     ungroup() |>
     mutate(rf = -rf) |>
     arrange(rf) |> 
