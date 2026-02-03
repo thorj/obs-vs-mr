@@ -1,7 +1,7 @@
 
 export_image <- function(plot, fig_name, width, height, dpi = 300) {
     path <- 
-        file.path("images", 
+        file.path("figures", 
                   c("low_res", "high_res"), 
                   paste0(fig_name, ".", c("png", "pdf")))
     ggplot2::ggsave(
