@@ -1,4 +1,4 @@
-# Title of the Paper (Short)
+# Observational vs MR Estimates
 
 This repository contains the R code used to generate the figures, tables, and Bayesian model results for the paper:
 
