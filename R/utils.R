@@ -15,7 +15,8 @@ export_image <- function(plot, fig_name, width, height, dpi = 300) {
         filename = path[2],
         plot = plot,
         width = width,
-        height = height
+        height = height,
+        device = cairo_pdf
     )
     invisible(path)
 }

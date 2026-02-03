@@ -96,5 +96,3 @@ observed_agreement <-
           legend.margin = margin())
 
 export_image(plot = observed_agreement, fig_name = "figure4_agreement_ratios", width = 12, height = 7, dpi = 300)
-
-observed_agreement
