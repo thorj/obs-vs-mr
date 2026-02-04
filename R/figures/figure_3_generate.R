@@ -56,6 +56,26 @@ make_mr_barplot <- function(df, ylims, y_breaks) {
         base_theme
 }
 
+crossbar_guides <- function() {
+    guides(
+        fill = guide_legend(
+            nrow = 2, order = 1, title = "",
+            theme = theme(legend.key.spacing.y = unit(0, "cm"),
+                          legend.margin = margin())
+        ),
+        shape = guide_legend(
+            nrow = 2, order = 2, title = "",
+            theme = theme(legend.key.spacing.y = unit(0, "cm"),
+                          legend.margin = margin())
+        ),
+        linetype = guide_legend(
+            nrow = 2, order = 1, title = "",
+            theme = theme(legend.key.spacing.y = unit(0, "cm"),
+                          legend.margin = margin())
+        )
+    )
+}
+
 ## ============================================================
 ## TOP PANELS: MR significance (primary + secondary)
 ## ============================================================
@@ -78,24 +98,22 @@ secondary_mr_sig <-
 ## LOWER PANELS: enrichment of MR significance in observational tail
 ## ============================================================
 
-noobs <- 
+tester <- 
     obs |>
     filter(has_cis == 1) |>
     group_by(event)|>
     mutate(mrfdr = p.adjust(pval.mr, "fdr", n()),
-           sec_analysis = as.integer(mrfdr < 0.05))
-
-
-tester <-
-    noobs |>
-    mutate(obs_sig.mr2 = if_else(is.na(obs_sig.mr), 0, obs_sig.mr),
+           sec_analysis = as.integer(mrfdr < 0.05),
+           obs_sig.mr2 = if_else(is.na(obs_sig.mr), 0, obs_sig.mr),
            mr_significant = if_else(obs_sig.mr2 + sec_analysis > 0, 1, 0)) |>
     ungroup()
 
 mrsig_res <-
     lapply(tester$event |> unique(),
            FUN = function(x) {
-               df <- tester |> filter(event == {{ x }}) |> mutate(intail = as.integer(pval < 0.05/7288))
+               df <- tester |> 
+                   filter(event == {{ x }}) |> 
+                   mutate(intail = as.integer(pval < 0.05/7288))
                m1 <- 
                    glm(mr_significant ~ intail, data = df, family = binomial())
                res <- 
@@ -125,7 +143,9 @@ fisher_anno <-
            event = term) |>
     select(term, estimate2, event)  |>
     inner_join(fisher_test_on_bad |> select(-fisher_est)) |>
-    inner_join(primary_mr_significant |> select(order, event, phenotype, trait), by = join_by("event")) |>
+    inner_join(primary_mr_significant |> 
+                   select(order, event, phenotype, trait), 
+               by = join_by("event")) |>
     mutate(pp = round(fisher_p, 2),
            label = paste0("FET P-value: ", pp)) |>
     select(event, order, trait, label, estimate2)
@@ -136,36 +156,15 @@ mrsig_df <-
            conf.low = estimate2 - 1.96 * std.error,
            conf.high = estimate2 + 1.96 * std.error) |>
     rename(event = term) |>
-    inner_join(primary_mr_significant |> select(order, event, phenotype, trait), by = join_by("event")) |>
+    inner_join(primary_mr_significant |>
+                   select(order, event, phenotype, trait), 
+               by = join_by("event")) |>
     arrange(order) |>
     mutate(sig = if_else(p.value < 0.05, 1, 0),
-           sig = factor(sig, levels = c(0, 1), labels = c("P ≥ 0.05", "P < 0.05")))
+           sig = factor(sig, 
+                        levels = c(0, 1), 
+                        labels = c("P ≥ 0.05", "P < 0.05")))
 
-mr_sig_table <-
-    f |> 
-    select(trait, group, phenotype, event) |>
-    inner_join(mrsig_df) |>
-    full_join(fisher_test_on_bad) |>
-    select(-order, -sig) |>
-    mutate(estimate = if_else(is.na(fisher_p), signif(estimate, digits = 3), signif(fisher_est, digits = 3)),
-           std.error = if_else(is.na(fisher_p), signif(std.error, digits = 3), NA),
-           p.value = if_else(is.na(fisher_p), signif(p.value, digits = 3), signif(fisher_p, digits = 3)),
-           statistic = if_else(is.na(fisher_p), signif(statistic, digits = 3), NA),
-           conf.low = if_else(is.na(fisher_p), signif(conf.low, digits = 3), NA),
-           conf.high = if_else(is.na(fisher_p), signif(conf.high, digits = 3), NA),
-           significant = as.integer(p.value < 0.05),
-           note = if_else(is.na(estimate2), "Tested with Fisher's exact test", "")) |>
-    select(-estimate2, -fisher_p, -fisher_est) |>
-    relocate(conf.low, .before = "statistic") |>
-    relocate(conf.high, .before = "statistic") 
-
-#fwrite(x = mr_sig_table, file = "tables/tables_new/results_mr_forward_sig_enrichment_in_tail.csv")
-
-### cis info
-cis_info <- readRDS("data/reoccurring_data/cis_protein_data.rds")
-prop_w_cis <- cis_info$overall_cis_prop
-cis_df <- cis_info$bonferroni_with_cis
-has_cis <- cis_info$has_cis
 
 background_df <- data.frame(
     xmin = as.numeric(levels(has_cis$order2)) - 0.5,
@@ -202,25 +201,11 @@ mrsig_plot <-
     scale_shape_manual(values = c("P ≥ 0.05" = 1, "P < 0.05" = 16)) +
     scale_linetype_manual(values = c("Disease" = 1, "Risk factor" = other_lty)) + 
     coord_flip() +
-    guides(
-        fill = guide_legend(nrow = 2, order = 1,
-                            title = "",
-                            theme = theme(legend.key.spacing.y = unit(0, "cm"),
-                                          legend.margin = margin())),
-        shape = guide_legend(nrow = 2, title = "", order = 2,
-                             theme = theme(legend.key.spacing.y = unit(0, "cm"),
-                                           legend.margin = margin())),
-        linetype = guide_legend(nrow = 2, title = "", order = 1,
-                                theme = theme(legend.key.spacing.y = unit(0, "cm"),
-                                              legend.margin = margin()))
-    ) +
+    crossbar_guides() +
     labs(x = "", 
          y = "Log-odds ratio", 
          linetype = "") +
-    theme_bw(base_size = 12) +
-    theme(axis.title = element_text(face = "bold"),
-          legend.position = "bottom",
-          legend.box = "horizontal")
+    base_theme
 
 ### REVERSE
 
@@ -248,13 +233,15 @@ tester2 <-
 revmrsig_res <-
     lapply(tester2$event |> unique(),
            FUN = function(x) {
-               df <- tester2 |> filter(event == {{ x }}) |> mutate(intail = as.integer(pval < 0.05/7288))
+               df <- tester2 |> 
+                   filter(event == {{ x }}) |> 
+                   mutate(intail = as.integer(pval < 0.05/7288))
                wmsg <- NULL
                m1 <- withCallingHandlers(
                    glm(mr_significant ~ intail, data = df, family = binomial()),
                    warning = function(w) {
                        wmsg <<- conditionMessage(w)
-                       invokeRestart("muffleWarning")  # optional: comment out if you want to see the warning
+                       invokeRestart("muffleWarning")
                    }
                )
                if (!is.null(wmsg)) {
@@ -329,81 +316,6 @@ fisher_secanno <-
                            "No significant hits",
                            paste0("FET P-value: ", pp))) |>
     select(event, order, trait, label, estimate2)
-
-#### TABLE FOR PLOT DATA
-mr_rev_sig_table <-
-    f |> 
-    select(trait, group, phenotype, event) |>
-    inner_join(mrsig_plot2_df) |>
-    select(-order, -sig) |>
-    full_join(fisher_secanal |> rename(fisher_est = fisher_estimate) |> mutate(fisher_est = log(fisher_est))) |>
-    full_join(mrsig_plot2_df |>
-                  filter(include == 0) |>
-                  mutate(note = 
-                             case_when(
-                                 event %in% fisher_secanal$event ~ "Tested with Fisher's exact test",
-                                 TRUE ~ "No significant hits"
-                             )) |>
-                  select(event, note)) |>
-    mutate(estimate = if_else(is.na(fisher_p), signif(estimate, digits = 3), signif(fisher_est, digits = 3)),
-           std.error = if_else(is.na(fisher_p), signif(std.error, digits = 3), NA),
-           p.value = if_else(is.na(fisher_p), signif(p.value, digits = 3), signif(fisher_p, digits = 3)),
-           statistic = if_else(is.na(fisher_p), signif(statistic, digits = 3), NA),
-           conf.low = if_else(is.na(fisher_p), signif(conf.low, digits = 3), NA),
-           conf.high = if_else(is.na(fisher_p), signif(conf.high, digits = 3), NA),
-           significant = as.integer(p.value < 0.05)) |>
-    select(-wmsg, -include, -estimate2) |>
-    mutate(estimate = 
-               case_when(
-                   is.na(note) ~ estimate,
-                   note == "No significant hits" ~ NA,
-                   note == "Tested with Fisher's exact test" ~ estimate
-               ),
-           std.error = 
-               case_when(
-                   is.na(note) ~ std.error,
-                   note == "No significant hits" ~ NA,
-                   note == "Tested with Fisher's exact test" ~ std.error
-               ),
-           statistic = 
-               case_when(
-                   is.na(note) ~ statistic,
-                   note == "No significant hits" ~ NA,
-                   note == "Tested with Fisher's exact test" ~ statistic
-               ),
-           p.value = 
-               case_when(
-                   is.na(note) ~ p.value,
-                   note == "No significant hits" ~ NA,
-                   note == "Tested with Fisher's exact test" ~ p.value
-               )
-    ) |>
-    select(-fisher_p, -fisher_est) |>
-    relocate(conf.low, .before = "statistic") |>
-    relocate(conf.high, .before = "statistic") |>
-    relocate(significant, .before = "note")
-
-#fwrite(x = mr_rev_sig_table, file = "tables/tables_new/results_mr_reverse_sig_enrichment_in_tail.csv")
-
-mr_sig_table <-
-    f |> 
-    select(trait, group, phenotype, event) |>
-    inner_join(mrsig_df) |>
-    full_join(fisher_test_on_bad) |>
-    select(-order, -sig) |>
-    mutate(estimate = if_else(is.na(fisher_p), signif(estimate, digits = 3), signif(fisher_est, digits = 3)),
-           std.error = if_else(is.na(fisher_p), signif(std.error, digits = 3), NA),
-           p.value = if_else(is.na(fisher_p), signif(p.value, digits = 3), signif(fisher_p, digits = 3)),
-           statistic = if_else(is.na(fisher_p), signif(statistic, digits = 3), NA),
-           conf.low = if_else(is.na(fisher_p), signif(conf.low, digits = 3), NA),
-           conf.high = if_else(is.na(fisher_p), signif(conf.high, digits = 3), NA),
-           significant = as.integer(p.value < 0.05),
-           note = if_else(is.na(estimate2), "Tested with Fisher's exact test", "")) |>
-    select(-estimate2, -fisher_p, -fisher_est) |>
-    relocate(conf.low, .before = "statistic") |>
-    relocate(conf.high, .before = "statistic") 
-
-#fwrite(x = mr_sig_table, file = "tables/tables_new/results_mr_forward_sig_enrichment_in_tail.csv")
 
 mrsig_2 <-
     mrsig_plot2_df |>
