@@ -21,65 +21,11 @@ posterior_p <-
     rstan::extract(bayes_res, 
                    pars = names(bayes_res)[grepl("^alpha$|alpha_p|gamma_g|beta_s|theta_f|theta_tc", names(bayes_res))])
 
-forward <-
-    obs |>
-    filter(obs_sig.mr == 1) |>
-    mutate(sig = as.integer(sign(beta) == sign(beta.mr))) |>
-    group_by(event) |>
-    summarize(n = n(), a = sum(sig), r = a/n) |>
-    mutate(rftext = paste0(a, " / ", n))
+primary_mr_summary <- readRDS("data/reoccurring_data/primary_mr_summary.rds")
+primary_mr_agreement <- primary_mr_summary$primary_mr_agreement
 
-fmissevent <- base::setdiff(obs$event, forward$event)
-
-forward_missing <-
-    obs |>
-    filter(event %in% fmissevent) |>
-    filter(has_cis == 1, p.bon < 0.05) |>
-    group_by(event) |>
-    mutate(mrfdr = p.adjust(pval.mr, "fdr", n())) |>
-    summarize(n = n(), a = sum(mrfdr < 0.05)) |>
-    mutate(r = 0,
-           rftext = "No significant forward hits")
-
-forward <- rbind(forward, forward_missing)
-
-reverse <-
-    obs |>
-    filter(p.bon < 0.05) |>
-    group_by(event) |>
-    mutate(fdr.rev = p.adjust(pval.rev.mr, "fdr", n())) |>
-    filter(fdr.rev < 0.05) |>
-    mutate(sig = as.integer(sign(beta) == sign(beta.rev.mr))) |>
-    summarize(n = n(), a = sum(sig), r = a/n) |>
-    mutate(rrtext = paste0(a, " / ", n))
-
-rmissevent <- base::setdiff(obs$event, reverse$event)
-
-reverse_missing <-
-    obs |>
-    filter(event %in% rmissevent) |>
-    filter(p.bon < 0.05) |>
-    group_by(event) |>
-    mutate(mrfdr = p.adjust(pval.rev.mr, "fdr", n())) |>
-    summarize(n = n(), a = sum(mrfdr < 0.05)) |>
-    mutate(r = 0,
-           rrtext = "No significant reverse hits")
-
-reverse <- rbind(reverse, reverse_missing)
-
-
-agreement <- 
-    full_join(forward |> select(event, rftext, rf = r),
-              reverse |> select(event, rrtext, rr = r)) |>
-    ungroup() |>
-    mutate(rf = -rf) |>
-    arrange(rf) |> 
-    mutate(order = factor(row_number())) |>
-    mutate(rf = replace_na(rf, 0),
-           rr = replace_na(rr, 0)) |>
-    full_join(f |> select(-order)) |>
-    mutate(include = if_else(N == 0 & rr == 0, 0, 1))
-
+secondary_mr_summary <- readRDS("data/reoccurring_data/secondary_mr_summary.rds")
+secondary_mr_agreement <- secondary_mr_summary$secondary_mr_agreement
 
 ## Helper function to get variable from posterior
 retrieve_post_col <- function(posterior, para, idx) {
@@ -133,24 +79,37 @@ compute_tilde_q_p_full <- function(posterior, group_vec, L, P, input_data) {
     return(tilde_q_p)
 }
 
-compute_tilde_q_p_full(posterior_p, group$groupf, L = 10, P = stan_data$P, input_data = h1)
-q_t_p <- compute_tilde_q_p_full(posterior_p, group$groupf, L = 10000, P = stan_data$P, input_data = h1)
+#compute_tilde_q_p_full(posterior_p, group$groupf, L = 10, P = stan_data$P, input_data = h1)
+q_t_p <- compute_tilde_q_p_full(posterior_p, 
+                                group$groupf, 
+                                L = 10000, 
+                                P = stan_data$P, 
+                                input_data = h1)
 
 q_t_p_df <- 
-    h1 |> group_by(phenotype_id, event, groupf) |> count() |> select(-n) |>
-    inner_join(f |> filter(N > 0) |> mutate(r = Y/N), by = join_by("event")) |>  ### careful... any f |> filter(N > 0) might be wrong after update
+    h1 |> 
+    group_by(phenotype_id, event, groupf) |> 
+    count() |> 
+    select(-n) |>
+    inner_join(f |> filter(N > 0) |> mutate(r = Y/N), 
+               by = join_by("event")) |>  ### careful... any f |> filter(N > 0) might be wrong after update
     inner_join(data.frame(phenotype_id = 1:21, 
                           m = apply(q_t_p, MARGIN = 2, median),
                           q025 = apply(q_t_p, MARGIN = 2, quantile, probs = 0.025),
-                          q975 = apply(q_t_p, MARGIN = 2, quantile, probs = 0.975))) |>
+                          q975 = apply(q_t_p, MARGIN = 2, quantile, probs = 0.975)),
+               by = join_by(phenotype_id)) |>
     arrange(m) |>
     ungroup() |>
     mutate(order = n() - row_number()) |>
     inner_join(
-        fread("data/00b_no_obs_res.csv") |>
-            mutate(r_no_obs = total_agreef/total_mr_for) |>
-            select(event, r_no_obs) 
-    )
+        secondary_mr_agreement |>
+            mutate(r_no_obs = abs(rf)) |>
+            select(event, r_no_obs),
+        by = join_by(event)
+    ) |>
+    inner_join(primary_mr_agreement |> select(event, order2 = order),
+               by = join_by(event)) |>
+    arrange(order2)
 
 
 global_mean <- rowMeans(q_t_p) |> median()
@@ -160,9 +119,6 @@ qt_area <-
     data.frame(order2 = c(0.5, 22))
 
 point_size <- 2
-q_t_p_df <-
-    q_t_p_df |> inner_join(agreement |> select(event, order2 = order)) |>
-    arrange(order2)
 
 hibayes_plt <- 
     q_t_p_df |>
@@ -191,8 +147,6 @@ hibayes_plt <-
     theme_bw(base_size = 12) +
     theme(axis.title = element_text(face = "bold"), legend.position = "bottom") +
     coord_flip()
-
-#hibayes_plt
 
 #### Posterior density
 ## Start with posterior distribution of tc

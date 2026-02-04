@@ -228,10 +228,11 @@ secondary_mr_agreement <-
               by = join_by(event)) |>
     mutate(include = if_else(N == 0 & rr == 0, 0, 1))
 
-fread("data/00b_no_obs_res.csv") |> filter(event == "a2dm2")
-
 saveRDS(object = 
             list(secondary_mr_forward_significant = secondary_forward_mr_significant ,
                  secondary_mr_reverse_significant = secondary_reverse_mr_significant,
-                 secondary_mr_significant = secondary_mr_significant), 
-        file = "data/reoccurring_data/secondary_mr_significant.rds")
+                 secondary_mr_significant = secondary_mr_significant,
+                 secondary_mr_forward_agreement = secondary_forward_mr_agreement,
+                 secondary_mr_reverse_agreement = secondary_reverse_mr_agreement,
+                 secondary_mr_agreement = secondary_mr_agreement),
+        file = "data/reoccurring_data/secondary_mr_summary.rds")
