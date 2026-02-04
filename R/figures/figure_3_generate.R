@@ -146,6 +146,25 @@ enrichment_fit <- function(df, independent_var, response_var, event) {
         mutate(term = {{ event }})
 }
 
+fisher_if_bad <- function(df, response_var, bad_events) {
+    df |>
+        filter(event %in% {{ bad_events }}) |>
+        mutate(intail = as.integer(pval < 0.05/7288)) |>
+        group_by(event) |>
+        group_nest() |>
+        mutate(
+            tabx = map(data, ~table(.x[[response_var]], .x$intail)),
+            fisher = map(tabx, fisher.test),
+            fisher_p = map_dbl(fisher, "p.value"),
+            fisher_est = log(map_dbl(fisher, "estimate"))
+        ) |>
+        select (
+            event = event,
+            fisher_p,
+            fisher_est
+        )
+}
+
 ## ============================================================
 ## TOP PANELS: MR significance (primary + secondary)
 ## ============================================================
@@ -168,7 +187,7 @@ secondary_mr_sig <-
 ## LOWER PANELS: enrichment of MR significance in observational tail
 ## ============================================================
 
-tester <- 
+forward_df <- 
     obs |>
     filter(has_cis == 1) |>
     group_by(event)|>
@@ -179,24 +198,16 @@ tester <-
     ungroup()
 
 mrsig_res_ <- 
-    lapply(X = tester$event |> unique(), 
+    lapply(X = forward_df$event |> unique(), 
            FUN = function(x) {
                enrichment_by_event(df = tester, event = x)
            }) |> 
     data.table::rbindlist()
 
+bad_events_forward <- mrsig_res |> filter(std.error > 5) |> pull(term)
 
-fisher_test_on_bad <-
-    tester |>
-    filter(event %in% mrsig_res$term[mrsig_res$std.error > 5]) |>
-    mutate(intail = as.integer(p.bon < 0.5)) |>
-    group_by(event) |>
-    group_nest() |>
-    mutate(tabx = map(data, ~table(.x$mr_significant, .x$intail)),
-           fisher = map(tabx, fisher.test),
-           fisher_p = map_dbl(fisher, "p.value"),
-           fisher_est = log(map_dbl(fisher, "estimate"))) |>
-    select(event, fisher_p, fisher_est)
+fisher_forward <- 
+    fisher_if_bad(tester, "mr_significant", bad_events_forward)
 
 fisher_anno <-
     mrsig_res |>
@@ -227,7 +238,6 @@ mrsig_df <-
                         levels = c(0, 1), 
                         labels = c("P ≥ 0.05", "P < 0.05")))
 
-
 ### REVERSE
 
 rev_mr_obs <-
@@ -250,34 +260,41 @@ tester2 <-
            mr_significant = if_else(prim_rev_sig2  + sec_analysis > 0, 1, 0)) |>
     ungroup()
 
+## Bad events have either zero significant proteins OR zero cells in frequency table
 
-revmrsig_res <-
-    lapply(tester2$event |> unique(),
+check_table_for_bad_sep <- function(tbl) {
+    sapply(X = tbl, FUN = function(x) { x <= 5}) |> sum()
+}
+
+bad_events_reverse_base <- 
+    tester2 |>
+    mutate(intail = as.integer(p.bon < 0.05)) |>
+    group_by(event) |>
+    group_nest() |>
+    mutate(tabx = map(data, ~table(.x$mr_significant, .x$intail)),
+           totalsigs = map_dbl(data, ~sum(.x$mr_significant)),
+           any_bad_sep = map_dbl(tabx, check_table_for_bad_sep),
+           include = if_else(totalsigs == 0 | any_bad_sep > 0, 0, 1))
+
+bad_events_reverse_no_significant <- 
+    bad_events_reverse_base |>
+    filter(totalsigs == 0)
+
+bad_events_reverse_separation <-
+    bad_events_reverse_base |>
+    filter(any_bad_sep > 0)
+
+good_events <- bad_events_reverse_base$event[bad_events_reverse_base$include == 1]
+
+revmrsig_res_ <- 
+    lapply(X = good_events, 
            FUN = function(x) {
-               df <- tester2 |> 
-                   filter(event == {{ x }}) |> 
-                   mutate(intail = as.integer(pval < 0.05/7288))
-               wmsg <- NULL
-               m1 <- withCallingHandlers(
-                   glm(mr_significant ~ intail, data = df, family = binomial()),
-                   warning = function(w) {
-                       wmsg <<- conditionMessage(w)
-                       invokeRestart("muffleWarning")
-                   }
-               )
-               if (!is.null(wmsg)) {
-                   message("Warning for outcome ", x, ": ", wmsg)
-               }
-               res <- 
-                   broom::tidy(m1) |>
-                   filter(term == "intail") |> 
-                   mutate(term = {{ x }},
-                          wmsg = ifelse(is.null(wmsg), 0, 1))
-               return(res)
+               enrichment_by_event(df = tester2, event = x)
            }) |> 
     data.table::rbindlist()
 
-revmrsig_res 
+fisher_reverse <- 
+    fisher_if_bad(tester2, "mr_significant", bad_events_reverse_separation$event)
 
 mrsig_plot2_df <- 
     revmrsig_res |>
@@ -295,18 +312,19 @@ mrsig_plot2_df <-
 
 tester2 |>
     filter(event %in% mrsig_plot2_df$event[mrsig_plot2_df$include == 0]) |>
-    mutate(intail = as.integer(p.bon < 0.5)) |>
+    mutate(intail = as.integer(p.bon < 0.05)) |>
     group_by(event) |>
     summarize(a = sum(mr_significant))
 
 tmptmp <- 
     tester2 |>
     filter(event %in% mrsig_plot2_df$event[mrsig_plot2_df$include == 0]) |>
-    mutate(intail = as.integer(p.bon < 0.5)) |>
+    mutate(intail = as.integer(p.bon < 0.05)) |>
     group_by(event) |>
     group_nest() |>
     mutate(tabx = map(data, ~table(.x$mr_significant, .x$intail)),
            totalsigs = map_dbl(data, ~sum(.x$mr_significant)))
+
 
 fisher_secanal <-
     tmptmp |>
