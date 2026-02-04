@@ -1,6 +1,7 @@
 data_paths <- list(
     phenotype_overview = "data/phenotype_overview.csv",
     observational_full = "data/observational_results_full.csv",
+    observational_significant = "data/reoccurring_data/bonferroni_sig_obs.csv",
     primary_mr_overview = "data/primary_mr_overview.csv",
     group_map = "data/stan_map_pheno_to_group.rds",
     protein_map = "data/stan_map_soma_to_egs.rds",

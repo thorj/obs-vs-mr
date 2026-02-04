@@ -3,15 +3,24 @@ library(patchwork)
 box::use(data.table[fread, fwrite])
 source("R/utils.R")
 
-### Load data
-f <- fread("data/phenotype_overview.csv")
-obs <- fread("data/observational_results_full.csv")
-
-### CONST
+## Constants
 other_lty <- 0
-####
 
-sig_df <- fread("data/reoccurring_data/bonferroni_sig_obs.csv")
+## ============================================================
+## Load data
+## ============================================================
+
+f <- fread(data_paths$phenotype_overview)
+obs <- fread(data_paths$observational_full)
+sig_df <- fread(data_paths$observational_significant)
+cis_info <- readRDS(data_paths$cis_info)
+prop_w_cis <- cis_info$overall_cis_prop
+cis_df <- cis_info$bonferroni_with_cis
+has_cis <- cis_info$has_cis
+
+## ============================================================
+## Panel A: # significant SOMAmers (Bonferroni)
+## ============================================================
 
 sig_pan <- 
     sig_df |>
@@ -35,19 +44,9 @@ sig_pan <-
     theme(axis.title = element_text(face = "bold"),
           legend.position = "bottom")
 
-### cis info
-cis_info <- readRDS("data/reoccurring_data/cis_protein_data.rds")
-prop_w_cis <- cis_info$overall_cis_prop
-cis_df <- cis_info$bonferroni_with_cis
-has_cis <- cis_info$has_cis
-
-background_df <- data.frame(
-    xmin = as.numeric(levels(has_cis$order)) - 0.5,
-    xmax = as.numeric(levels(has_cis$order)) + 0.5,
-    ymin = -Inf,
-    ymax = Inf,
-    fill = rep(c("grey90", "white"), length.out = length(levels(has_cis$order)))
-)
+## ============================================================
+## Panel B: proportion with cis instruments
+## ============================================================
 
 cis_pan <- 
     cis_df |>
@@ -66,11 +65,17 @@ cis_pan <-
     theme(axis.title = element_text(face = "bold"),
           legend.position = "bottom")
 
-### Bonferroni tail enrichment
+## ============================================================
+## Bonferroni tail enrichment per phenotype
+## ============================================================
+
 tail_res <-
     lapply(obs$event |> unique(),
            FUN = function(x) {
-               df <- obs |> filter(event == {{ x }}) |> mutate(intail = pval < 0.05/7288)
+               df <- 
+                   obs |> 
+                   filter(event == {{ x }}) |> 
+                   mutate(intail = pval < 0.05/7288)
                m1 <- 
                    glm(intail ~ has_cis, data = df, family = binomial())
                res <- 
@@ -81,11 +86,10 @@ tail_res <-
            }) |> 
     data.table::rbindlist()
 
-
 tail_res_table <- 
     f |> 
     select(trait, group, phenotype, term = event, order) |>
-    inner_join(tail_res) |>
+    inner_join(tail_res, by = join_by(term)) |>
     select(-order) |>
     mutate(conf.low = signif(estimate - 1.96 * std.error, digits = 3),
            conf.high = signif(estimate + 1.96 * std.error, digits = 3),
@@ -94,18 +98,32 @@ tail_res_table <-
            std.error = signif(std.error, digits = 3),
            statistic = signif(statistic, digits = 3),
            significant = as.integer(p.value < 0.05)) |>
-    relocate(conf.low, .before = "statistic") |>
-    relocate(conf.high, .before = "statistic") 
+    relocate(conf.low, conf.high, .before = "statistic")
 
 #fwrite(x = tail_res_table, file = "tables/tables_new/results_cis_enrichment_in_tail.csv")
+
+## ============================================================
+## Panel C: cis tail enrichment effect sizes (with alternating background)
+## ============================================================
+
+background_df <- data.frame(
+    xmin = as.numeric(levels(has_cis$order)) - 0.5,
+    xmax = as.numeric(levels(has_cis$order)) + 0.5,
+    ymin = -Inf,
+    ymax = Inf,
+    fill = rep(c("grey90", "white"), length.out = length(levels(has_cis$order)))
+)
 
 cis_tail <-
     tail_res |>
     rename(event = term) |>
-    inner_join(has_cis |> select(order2, event, phenotype, trait), by = join_by("event")) |>
+    inner_join(has_cis |> 
+                   select(order2, event, phenotype, trait), 
+               by = join_by("event")) |>
     arrange(order2) |>
     mutate(sig = if_else(p.value < 0.05, 1, 0),
-           sig = factor(sig, levels = c(0, 1), labels = c("P ≥ 0.05", "P < 0.05")),
+           sig = factor(sig, levels = c(0, 1), 
+                        labels = c("P ≥ 0.05", "P < 0.05")),
            conf.low = estimate - 1.96 * std.error,
            conf.high = estimate + 1.96 * std.error) |>
     ggplot(aes(x = order2, y = estimate)) +
@@ -127,9 +145,11 @@ cis_tail <-
                   alpha = 0.6) +
     geom_point(aes(shape = sig), size = 2) +
     geom_hline(yintercept = 0, lty = 2) +
-    scale_y_continuous(labels = scales::number, breaks = scales::pretty_breaks(n = 7)) +
+    scale_y_continuous(labels = scales::number, 
+                       breaks = scales::pretty_breaks(n = 7)) +
     scale_x_discrete(labels = has_cis$phenotype) +
-    scale_fill_manual(values = c("Disease" = "#1E88E5", "Risk factor" = "orange"), drop = T) +
+    scale_fill_manual(values = c("Disease" = "#1E88E5", "Risk factor" = "orange"), 
+                      drop = T) +
     scale_shape_manual(values = c("P ≥ 0.05" = 1, "P < 0.05" = 16)) +
     scale_linetype_manual(values = c("Disease" = 1, "Risk factor" = other_lty)) +
     coord_flip() +
@@ -153,6 +173,9 @@ cis_tail <-
           legend.position = "bottom",
           legend.box = "horizontal")
 
+## ============================================================
+## Combine + export
+## ============================================================
 
 layout <- "
 AABB
