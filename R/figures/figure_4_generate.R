@@ -4,19 +4,28 @@ library(patchwork)
 box::use(data.table[fread, fwrite])
 source("R/utils.R")
 
-### CONST
+## Constants
 other_lty <- 0
 
-### Load data
-f <- fread("data/phenotype_overview.csv")
-obs <- fread("data/observational_results_full.csv")
+## ============================================================
+## Load data
+## ============================================================
 
-primary_mr_summary <- readRDS("data/reoccurring_data/primary_mr_summary.rds")
+f <- fread(data_paths$phenotype_overview)
+obs <- fread(data_paths$observational_full)
+primary_mr_summary <- readRDS(data_paths$primary_mr_summary)
 primary_mr_agreement <- primary_mr_summary$primary_mr_agreement
 
-observed_agreement <-
+## ============================================================
+## Plot: Agreement between observationl and primary MR estimates 
+## ============================================================
+
+plot_df <- 
     primary_mr_agreement |>
-    filter(include == 1) |>
+    filter(include == 1)
+
+observed_agreement <-
+    plot_df |>
     ggplot(aes(x = order)) +
     geom_col(aes(y = rf, fill = "Forward MR"), alpha = 0.6, color = "black") +
     geom_col(aes(y = rr, fill = "Reverse MR"), 
@@ -36,8 +45,12 @@ observed_agreement <-
     theme_bw(base_size = 12) +
     theme(axis.title = element_text(face = "bold"),
           legend.position = "bottom",
-          legend.box = "verticle",
+          legend.box = "vertical",
           legend.margin = margin())
+
+## ============================================================
+## Export
+## ============================================================
 
 export_image(plot = observed_agreement, 
              fig_name = "figure4_agreement_ratios", 
