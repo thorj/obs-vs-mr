@@ -5,36 +5,18 @@ library(ggrepel)
 box::use(data.table[fread, fwrite])
 source("R/utils.R")
 
-### Load data
-h1 <- fread("data/primary_mr_overview.csv")
-f <- fread("data/phenotype_overview.csv")
+## ============================================================
+## Load data
+## ============================================================
 
-hmf_df <-
-    h1 |>
-    mutate(hmf_n = ntile(hmf, n = 10)) |>
-    mutate(ac = factor(any_coding, levels = c(0,1), labels = c("No", "Yes"))) |>
-    mutate(hmf_n2 = factor(hmf_n, levels = 1:10, labels = paste0(10*1:10, "%"))) |>
-    group_by(hmf_n2, ac) |>
-    summarize(m = mean(agree),
-              n = n())
+f <- fread(data_paths$phenotype_overview)
+h1 <- fread(data_paths$primary_mr_overview)
 
-hmf_agree_cod <-
-    hmf_df |>
-    ggplot(aes(x = hmf_n2, y = m, color = ac, group = ac)) +
-    scale_color_manual(values=c("No" = "#648FFF", "Yes" = "#FFB000")) +
-    scale_y_continuous(breaks = 0:10/10, labels = scales::percent, limit = c(0, 1)) +
-    geom_point(aes(shape = ac), size = 3) +
-    geom_line() +
-    ggrepel::geom_label_repel(aes(label = n), size = 3) +
-    labs(x = "Harmonic mean F-statistic decile", 
-         y = "Observed agreement rate", 
-         color = "Contains coding variant",
-         shape = "Contains coding variant") +
-    theme_bw(base_size = 12) +
-    theme(axis.title = element_text(face = "bold"), 
-          legend.position = "bottom")
+## ============================================================
+## Panel A: agreement by phenotype group
+## ============================================================
 
-group_dumb <- 
+group_df <- 
     h1 |>
     group_by(groupf, group, any_coding) |>
     summarize(m = mean(agree),
@@ -43,9 +25,8 @@ group_dumb <-
     mutate(group = factor(group), 
            any_coding = factor(any_coding, levels = c(0, 1), 
                                labels = c("No", "Yes")))
-
 gd_plt <- 
-    group_dumb |>
+    group_df |>
     ggplot(aes(x = m, y = group)) +
     geom_vline(xintercept = 0.5, lty = 2, alpha = 0.5) +
     geom_line() +
@@ -61,22 +42,26 @@ gd_plt <-
     theme(legend.position = "bottom",
           axis.title = element_text(face = "bold"))
 
+## ============================================================
+## Panel B: agreement by phenotype
+## ============================================================
 
-pheno_dumb <- 
+pheno_df <- 
     f |> 
     filter(N > 0) |>
     select(phenotype, group, event) |>
     inner_join(h1 |>
                    group_by(event, any_coding) |>
                    summarize(n = n(),
-                             m = mean(agree))) |>
+                             m = mean(agree)),
+               by = join_by(event)) |>
     ungroup() |>
     mutate(phenotype = factor(phenotype), 
            any_coding = factor(any_coding, levels = c(0, 1), 
                                labels = c("No", "Yes"))) 
 
 pd_plt <- 
-    pheno_dumb |>
+    pheno_df |>
     ggplot(aes(x = m, y = phenotype)) +
     geom_vline(xintercept = 0.5, lty = 2, alpha = 0.5) +
     geom_line() +
@@ -92,8 +77,41 @@ pd_plt <-
     theme(legend.position = "bottom",
           axis.title = element_text(face = "bold"))
 
+## ============================================================
+## Panel C: agreement vs harmonic mean F-statistic decile
+## ============================================================
+
+hmf_df <-
+    h1 |>
+    mutate(hmf_n = ntile(hmf, n = 10)) |>
+    mutate(ac = factor(any_coding, levels = c(0,1), labels = c("No", "Yes"))) |>
+    mutate(hmf_n2 = factor(hmf_n, levels = 1:10, labels = paste0(10*1:10, "%"))) |>
+    group_by(hmf_n2, ac) |>
+    summarize(m = mean(agree),
+              n = n())
+
+hmf_agree_plt <-
+    hmf_df |>
+    ggplot(aes(x = hmf_n2, y = m, color = ac, group = ac)) +
+    scale_color_manual(values=c("No" = "#648FFF", "Yes" = "#FFB000")) +
+    scale_y_continuous(breaks = 0:10/10, labels = scales::percent, limit = c(0, 1)) +
+    geom_point(aes(shape = ac), size = 3) +
+    geom_line() +
+    ggrepel::geom_label_repel(aes(label = n), size = 3) +
+    labs(x = "Harmonic mean F-statistic decile", 
+         y = "Observed agreement rate", 
+         color = "Contains coding variant",
+         shape = "Contains coding variant") +
+    theme_bw(base_size = 12) +
+    theme(axis.title = element_text(face = "bold"), 
+          legend.position = "bottom")
+
+## ============================================================
+## Combine + export
+## ============================================================
+
 finalp <-
-    (gd_plt |  pd_plt | hmf_agree_cod) + 
+    (gd_plt |  pd_plt | hmf_agree_plt) + 
     plot_annotation(tag_levels = "A", tag_prefix = "Fig. ")
 
 export_image(plot = finalp, 

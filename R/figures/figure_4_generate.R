@@ -11,8 +11,6 @@ other_lty <- 0
 ## Load data
 ## ============================================================
 
-f <- fread(data_paths$phenotype_overview)
-obs <- fread(data_paths$observational_full)
 primary_mr_summary <- readRDS(data_paths$primary_mr_summary)
 primary_mr_agreement <- primary_mr_summary$primary_mr_agreement
 
