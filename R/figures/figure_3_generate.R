@@ -296,10 +296,10 @@ reverse_enrich <-
 ## LOWER PANELS: enrichment of MR significance in observational tail
 ## ============================================================
 
-mrsig_plot <- 
+forward_enrich_plot <- 
     make_crossbar_plot(plot_df = forward_enrich, 
                        background_df = background_df)
-mrsig_2 <-
+reverse_enrich_plot <-
     make_crossbar_plot(plot_df = reverse_enrich, 
                        background_df = background_df)
 
@@ -308,7 +308,7 @@ mrsig_2 <-
 ## ============================================================
 
 subpan_3 <- 
-    (fdr_sig | fdr_sec_sig) / (mrsig_plot | mrsig_2) + 
+    (primary_mr_sig | secondary_mr_sig) / (forward_enrich_plot | reverse_enrich_plot) + 
     plot_annotation(tag_levels = "A", tag_prefix = "Fig. ") &
     theme(plot.tag.position = c(0, 1),
           plot.tag = element_text(size = 12, hjust = 0, vjust = 0))
