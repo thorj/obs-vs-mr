@@ -9,10 +9,11 @@ base_theme <-
     theme_bw(base_size = 12) +
     theme(axis.title = element_text(face = "bold"),
           legend.position = "bottom",
-          legend.box = "vertical",
+          legend.box = "horizontal",
           legend.margin = margin())
 
 mr_fill <- c("Forward MR" = "#882255", "Reverse MR" = "#332288")
+crossbar_fill <- c("Disease" = "#1E88E5", "Risk factor" = "orange")
 
 ## ============================================================
 ## Load data
@@ -32,6 +33,14 @@ cis_info <- readRDS(data_paths$cis_info)
 prop_w_cis <- cis_info$overall_cis_prop
 cis_df <- cis_info$bonferroni_with_cis
 has_cis <- cis_info$has_cis
+
+background_df <- data.frame(
+    xmin = as.numeric(levels(has_cis$order2)) - 0.5,
+    xmax = as.numeric(levels(has_cis$order2)) + 0.5,
+    ymin = -Inf,
+    ymax = Inf,
+    fill = rep(c("grey90", "white"), length.out = length(levels(has_cis$order)))
+)
 
 ## ============================================================
 ## Helpers
@@ -74,6 +83,46 @@ crossbar_guides <- function() {
                           legend.margin = margin())
         )
     )
+}
+
+make_crossbar_plot <- function(plot_df, anno_df, background_df) {
+    plot_df |>
+        ggplot(aes(x = order, y = estimate2)) +
+        geom_rect(data = background_df, 
+                  aes(xmin = xmin, xmax = xmax, 
+                      ymin = ymin, ymax = ymax,), 
+                  fill = background_df$fill,
+                  alpha = 0.5, 
+                  inherit.aes = F, 
+                  show.legend = F
+        ) +
+        geom_crossbar(aes(ymin = conf.low, 
+                          ymax = conf.high, 
+                          fill = trait,
+                          linetype = trait), 
+                      middle.linetype = "blank",
+                      width = 0.6, 
+                      alpha = 0.6) +
+        geom_point(aes(shape = sig), size = 2) +
+        geom_hline(yintercept = 0, lty = 2) +
+        geom_label(data = anno_df, 
+                   aes(label = label),
+                   hjust = -0.1, 
+                   size = 2.5, 
+                   alpha = 0.3, 
+                   linewidth = 0.3) +
+        scale_y_continuous(labels = scales::number, 
+                           breaks = scales::pretty_breaks(n = 7)) +
+        scale_x_discrete(labels = plot_df$phenotype) +
+        scale_fill_manual(values = crossbar_fill, drop = T) +
+        scale_shape_manual(values = c("P ≥ 0.05" = 1, "P < 0.05" = 16)) +
+        scale_linetype_manual(values = c("Disease" = 1, "Risk factor" = other_lty)) + 
+        coord_flip() +
+        crossbar_guides() +
+        labs(x = "", 
+             y = "Log-odds ratio", 
+             linetype = "") +
+        base_theme 
 }
 
 ## ============================================================
@@ -165,47 +214,6 @@ mrsig_df <-
                         levels = c(0, 1), 
                         labels = c("P ≥ 0.05", "P < 0.05")))
 
-
-background_df <- data.frame(
-    xmin = as.numeric(levels(has_cis$order2)) - 0.5,
-    xmax = as.numeric(levels(has_cis$order2)) + 0.5,
-    ymin = -Inf,
-    ymax = Inf,
-    fill = rep(c("grey90", "white"), length.out = length(levels(has_cis$order)))
-)
-
-mrsig_plot <- 
-    mrsig_df |>
-    ggplot(aes(x = order, y = estimate2)) +
-    geom_rect(data = background_df, 
-              aes(xmin = xmin, xmax = xmax, 
-                  ymin = ymin, ymax = ymax,), 
-              fill = background_df$fill,
-              alpha = 0.5, 
-              inherit.aes = F, 
-              show.legend = F) +
-    geom_crossbar(aes(ymin = conf.low, 
-                      ymax = conf.high, 
-                      fill = trait,
-                      linetype = trait), 
-                  middle.linetype = "blank",
-                  width = 0.6, 
-                  alpha = 0.6) +
-    geom_point(aes(shape = sig), size = 2) +
-    geom_hline(yintercept = 0, lty = 2) +
-    geom_label(data = fisher_anno, aes(label = label),
-               hjust = -0.1, size = 2.5, alpha = 0.3, linewidth = 0.3) +
-    scale_y_continuous(labels = scales::number, breaks = scales::pretty_breaks(n = 7)) +
-    scale_x_discrete(labels = mrsig_df$phenotype) +
-    scale_fill_manual(values = c("Disease" = "#1E88E5", "Risk factor" = "orange"), drop = T) +
-    scale_shape_manual(values = c("P ≥ 0.05" = 1, "P < 0.05" = 16)) +
-    scale_linetype_manual(values = c("Disease" = 1, "Risk factor" = other_lty)) + 
-    coord_flip() +
-    crossbar_guides() +
-    labs(x = "", 
-         y = "Log-odds ratio", 
-         linetype = "") +
-    base_theme
 
 ### REVERSE
 
@@ -303,7 +311,6 @@ mrsig_plot2_df |>
                    TRUE ~ "No significant hits"
                ))
 
-
 fisher_secanno <-
     mrsig_plot2_df |>
     filter(include == 0) |>
@@ -317,57 +324,22 @@ fisher_secanno <-
                            paste0("FET P-value: ", pp))) |>
     select(event, order, trait, label, estimate2)
 
+## ============================================================
+## LOWER PANELS: enrichment of MR significance in observational tail
+## ============================================================
+
+mrsig_plot <- 
+    make_crossbar_plot(plot_df = mrsig_df, 
+                       anno_df = fisher_anno, 
+                       background_df = background_df)
 mrsig_2 <-
-    mrsig_plot2_df |>
-    ggplot(aes(x = order, y = estimate2)) +
-    geom_rect(data = background_df,
-              aes(xmin = xmin, xmax = xmax,
-                  ymin = ymin, ymax = ymax,),
-              fill = background_df$fill,
-              alpha = 0.5,
-              inherit.aes = F,
-              show.legend = F) +
-    geom_crossbar(aes(ymin = conf.low, 
-                      ymax = conf.high, 
-                      fill = trait,
-                      linetype = trait), 
-                  middle.linetype = "blank",
-                  width = 0.6, 
-                  alpha = 0.6) +
-    geom_point(aes(shape = sig), size = 2) +
-    geom_hline(yintercept = 0, lty = 2) +
-    geom_label(data = fisher_secanno, aes(label = label),
-               hjust = -0.1, size = 2.5, alpha = 0.3, linewidth = 0.3) +
-    scale_y_continuous(labels = scales::number, breaks = scales::pretty_breaks(n = 7)) +
-    scale_x_discrete(labels = mrsig_plot2_df$phenotype) +
-    scale_fill_manual(values = c("Disease" = "#1E88E5", "Risk factor" = "orange"), drop = T) +
-    scale_shape_manual(values = c("P ≥ 0.05" = 1, "P < 0.05" = 16)) +
-    scale_linetype_manual(values = c("Disease" = 1, "Risk factor" = other_lty)) + 
-    coord_flip() +
-    guides(
-        fill = guide_legend(nrow = 2, order = 1,
-                            title = "",
-                            theme = theme(legend.key.spacing.y = unit(0, "cm"),
-                                          legend.margin = margin())),
-        shape = guide_legend(nrow = 2, 
-                             title = "", 
-                             order = 2,
-                             theme = theme(legend.key.spacing.y = unit(0, "cm"),
-                                           legend.margin = margin())),
-        linetype = guide_legend(nrow = 2, 
-                                title = "", 
-                                order = 1,
-                                theme = theme(
-                                    legend.key.spacing.y = unit(0,"cm"),
-                                    legend.margin = margin()))
-        ) +
-    labs(x = "", 
-         y = "Log-odds ratio", 
-         linetype = "") +
-    theme_bw(base_size = 12) +
-    theme(axis.title = element_text(face = "bold"),
-          legend.position = "bottom",
-          legend.box = "horizontal")
+    make_crossbar_plot(plot_df = mrsig_plot2_df, 
+                       anno_df = fisher_secanno, 
+                       background_df = background_df)
+
+## ============================================================
+## Combine + export
+## ============================================================
 
 subpan_3 <- 
     (fdr_sig | fdr_sec_sig) / (mrsig_plot | mrsig_2) + 
