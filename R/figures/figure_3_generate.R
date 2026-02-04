@@ -1,67 +1,82 @@
 library(tidyverse)
 library(patchwork)
-source("R/utils.R")
 box::use(data.table[fread, fwrite])
+source("R/utils.R")
 
-### Load data
-f <- fread("data/phenotype_overview.csv")
-obs <- fread("data/observational_results_full.csv")
-
-### CONST
+## Constants
 other_lty <- 0
-
-sig_df <- fread("data/reoccurring_data/bonferroni_sig_obs.csv")
-
-### Primary MR significance
-primary_mr_significant <- readRDS("data/reoccurring_data/primary_mr_significant.rds")
-primary_mr_significant <- primary_mr_significant$primary_mr_significant
-
-fdr_sig <-
-    primary_mr_significant |>
-    ggplot(aes(x = order)) +
-    geom_col(aes(y = rf, fill = "Forward MR"), alpha = 0.6, color = "black") +
-    geom_col(aes(y = rr, fill = "Reverse MR"), lty = other_lty, alpha = 0.6, color = "black") +
-    geom_hline(yintercept = 0, lty = 1) +
-    geom_label(aes(y = rf, label = rftext), size = 3, hjust = 1.1) +
-    geom_label(aes(y = rr, label = rrtext), size = 3, hjust = -0.1) +
-    labs(y = "Proportion of MR significant SOMAmers", x = "", fill = "") +
-    scale_x_discrete(label = primary_mr_significant$phenotype) +
-    scale_y_continuous(labels = function(x) scales::percent(abs(x)),
-                       breaks = -10:10/10) +
-    scale_fill_manual(values = c("Forward MR" = "#882255", "Reverse MR" = "#332288"), drop = F) +
-    coord_flip(ylim = c(-0.3, 0.55)) +
+base_theme <-
     theme_bw(base_size = 12) +
     theme(axis.title = element_text(face = "bold"),
           legend.position = "bottom",
-          legend.box = "verticle",
+          legend.box = "vertical",
           legend.margin = margin())
 
-## same plot but do it for secondary analysis
-## Secondary MR significance
-secondary_mr_significant <- readRDS("data/reoccurring_data/secondary_mr_significant.rds")
-secondary_mr_significant <- secondary_mr_significant$secondary_mr_significant
+mr_fill <- c("Forward MR" = "#882255", "Reverse MR" = "#332288")
 
-fdr_sec_sig <-
-    secondary_mr_significant |>
-    ggplot(aes(x = order)) +
-    geom_col(aes(y = rf, fill = "Forward MR"), alpha = 0.6, color = "black") +
-    geom_col(aes(y = rr, fill = "Reverse MR"), lty = other_lty, alpha = 0.6, color = "black") +
-    geom_hline(yintercept = 0, lty = 1) +
-    geom_label(aes(y = rf, label = rftext), size = 3, hjust = 1.1) +
-    geom_label(aes(y = rr, label = rrtext), size = 3, hjust = -0.1) +
-    labs(y = "Proportion of MR significant SOMAmers", x = "", fill = "") +
-    scale_x_discrete(label = secondary_mr_significant$phenotype) +
-    scale_y_continuous(labels = function(x) scales::percent(abs(x)),
-                       breaks = -10:10/20) +
-    scale_fill_manual(values = c("Forward MR" = "#882255", "Reverse MR" = "#332288"), drop = F) +
-    coord_flip(ylim = c(-0.17, 0.25)) +
-    theme_bw(base_size = 12) +
-    theme(axis.title = element_text(face = "bold"),
-          legend.position = "bottom",
-          legend.box = "verticle",
-          legend.margin = margin())
+## ============================================================
+## Load data
+## ============================================================
 
-### LOWER PANEL
+f <- fread(data_paths$phenotype_overview)
+obs <- fread(data_paths$observational_full)
+sig_df <- fread(data_paths$observational_significant)
+
+primary_mr_summary <- readRDS(data_paths$primary_mr_summary)
+primary_mr_significant <- primary_mr_summary$primary_mr_significant
+
+secondary_mr_summary <- readRDS(data_paths$secondary_mr_summary)
+secondary_mr_significant <- secondary_mr_summary$secondary_mr_significant
+
+cis_info <- readRDS(data_paths$cis_info)
+prop_w_cis <- cis_info$overall_cis_prop
+cis_df <- cis_info$bonferroni_with_cis
+has_cis <- cis_info$has_cis
+
+## ============================================================
+## Helpers
+## ============================================================
+
+make_mr_barplot <- function(df, ylims, y_breaks) {
+    ggplot(df, aes(x = order)) +
+        geom_col(aes(y = rf, fill = "Forward MR"), alpha = 0.6, color = "black") +
+        geom_col(aes(y = rr, fill = "Reverse MR"),
+                 linetype = other_lty, alpha = 0.6, color = "black") +
+        geom_hline(yintercept = 0, lty = 1) +
+        geom_label(aes(y = rf, label = rftext), size = 3, hjust = 1.1) +
+        geom_label(aes(y = rr, label = rrtext), size = 3, hjust = -0.1) +
+        scale_x_discrete(labels = df$phenotype) +
+        scale_y_continuous(
+            labels = function(x) scales::percent(abs(x)),
+            breaks = y_breaks
+        ) +
+        scale_fill_manual(values = mr_fill, drop = FALSE, name = "") +
+        coord_flip(ylim = ylims) +
+        labs(x = "", y = "Proportion of MR significant SOMAmers") +
+        base_theme
+}
+
+## ============================================================
+## TOP PANELS: MR significance (primary + secondary)
+## ============================================================
+
+primary_mr_sig <-
+    make_mr_barplot(
+        df       = primary_mr_significant,
+        ylims    = c(-0.3, 0.55),
+        y_breaks = (-10:10) / 10
+    )
+
+secondary_mr_sig <-
+    make_mr_barplot(
+        df       = secondary_mr_significant,
+        ylims    = c(-0.17, 0.25),
+        y_breaks = (-10:10) / 20
+    )
+
+## ============================================================
+## LOWER PANELS: enrichment of MR significance in observational tail
+## ============================================================
 
 noobs <- 
     obs |>
