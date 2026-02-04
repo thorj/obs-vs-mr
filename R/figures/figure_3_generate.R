@@ -138,31 +138,40 @@ enrichment_by_event <- function(df, event) {
                    event = event)
 }
 
-enrichment_fit <- function(df, independent_var, response_var, event) {
+glm_enrichment_fit <- function(df, independent_var = "intail", response_var = "mr_significant", event) {
     model_formula <- reformulate(termlabels = independent_var, response = response_var)
     model <- glm(model_formula, data = df, family = binomial())
     broom::tidy(model) |>
         filter(term == {{ independent_var }}) |> 
-        mutate(term = {{ event }})
+        mutate(term = {{ event }},
+               method = "glm") |>
+        rename(event = term)
 }
 
-fisher_if_bad <- function(df, response_var, bad_events) {
+fisher_enrichment_fit <- function(df) {
     df |>
-        filter(event %in% {{ bad_events }}) |>
-        mutate(intail = as.integer(pval < 0.05/7288)) |>
-        group_by(event) |>
-        group_nest() |>
         mutate(
-            tabx = map(data, ~table(.x[[response_var]], .x$intail)),
             fisher = map(tabx, fisher.test),
-            fisher_p = map_dbl(fisher, "p.value"),
-            fisher_est = log(map_dbl(fisher, "estimate"))
+            p.value = map_dbl(fisher, "p.value"),
+            estimate = log(map_dbl(fisher, "estimate")),
+            std.error = NA,
+            statistic = NA,
+            method = "fisher"
         ) |>
         select (
-            event = event,
-            fisher_p,
-            fisher_est
+            event,
+            estimate,
+            std.error,
+            statistic,
+            p.value,
+            method
         )
+}
+
+## Bad events have either zero significant proteins OR zero cells in frequency table
+
+check_table_for_bad_sep <- function(tbl) {
+    sapply(X = tbl, FUN = function(x) { x == 0}) |> sum()
 }
 
 ## ============================================================
@@ -194,8 +203,63 @@ forward_df <-
     mutate(mrfdr = p.adjust(pval.mr, "fdr", n()),
            sec_analysis = as.integer(mrfdr < 0.05),
            obs_sig.mr2 = if_else(is.na(obs_sig.mr), 0, obs_sig.mr),
-           mr_significant = if_else(obs_sig.mr2 + sec_analysis > 0, 1, 0)) |>
-    ungroup()
+           mr_significant = if_else(obs_sig.mr2 + sec_analysis > 0, 1, 0),
+           intail = as.integer(p.bon < 0.05))
+
+
+perform_enrichment_analysis <- function(df, order_df) {
+    nested_df <- construct_enrichment_df(df)
+    events <- nested_df$event
+    lapply(X = events, enrichment_analysis, df = nested_df) |>
+        data.table::rbindlist() |>
+        inner_join(order_df |>
+                       select(order, event, phenotype, trait), 
+                   by = join_by("event")) |>
+        arrange(order) 
+}
+
+construct_enrichment_df <- function(df) {
+        df |> 
+        group_by(event) |>
+        group_nest() |>
+        mutate(tabx = map(data, ~table(.x$mr_significant, .x$intail)),
+               totalsigs = map_dbl(data, ~sum(.x$mr_significant)),
+               any_bad_sep = map_dbl(tabx, check_table_for_bad_sep),
+               include = if_else(totalsigs == 0 | any_bad_sep > 0, 0, 1))
+}
+
+enrichment_analysis <- function(df, event) {
+    event_df <- df |> filter(event == {{ event }})
+    if (event_df$include[1] == 0) {
+        enrichment_res <- fisher_enrichment_fit(event_df)
+    } else {
+        event_df <- event_df |> select(data) |> unnest(cols = c(data))
+        enrichment_res <- glm_enrichment_fit(df = event_df, event = {{ event }})
+    }
+    return(enrichment_annotation(enrichment_res))
+}
+
+enrichment_annotation <- function(df) {
+    df |>
+        mutate(estimate2 = if_else(method == "fisher", -Inf, estimate),
+               conf.low = estimate2 - 1.96 * std.error,
+               conf.high = estimate2 + 1.96 * std.error,
+               label = if_else(method == "fisher", 
+                               paste0("FET P-value: ", round(p.value, 2)),
+                               ""),
+               sig = if_else(p.value < 0.05, 1, 0),
+               sig = factor(sig, 
+                            levels = c(0, 1), 
+                            labels = c("P ≥ 0.05", "P < 0.05"))
+        )
+}
+
+perform_enrichment_analysis(forward_df, order_df = primary_mr_significant)
+
+bork <- construct_enrichment_df(forward_df)
+
+enrichment_analysis(bork, "a2dm2")
+
 
 mrsig_res_ <- 
     lapply(X = forward_df$event |> unique(), 
@@ -257,14 +321,14 @@ tester2 <-
     group_by(event) |>
     mutate(mrfdr = p.adjust(pval.rev.mr, "fdr", n()),
            sec_analysis = as.integer(mrfdr < 0.05),
-           mr_significant = if_else(prim_rev_sig2  + sec_analysis > 0, 1, 0)) |>
-    ungroup()
+           mr_significant = if_else(prim_rev_sig2  + sec_analysis > 0, 1, 0),
+           intail = as.integer(p.bon < 0.05)) |>
+    group_nest() |>
+    mutate(tabx = map(data, ~table(.x$mr_significant, .x$intail)),
+           totalsigs = map_dbl(data, ~sum(.x$mr_significant)),
+           any_bad_sep = map_dbl(tabx, check_table_for_bad_sep),
+           include = if_else(totalsigs == 0 | any_bad_sep > 0, 0, 1))
 
-## Bad events have either zero significant proteins OR zero cells in frequency table
-
-check_table_for_bad_sep <- function(tbl) {
-    sapply(X = tbl, FUN = function(x) { x <= 5}) |> sum()
-}
 
 bad_events_reverse_base <- 
     tester2 |>
@@ -295,6 +359,8 @@ revmrsig_res_ <-
 
 fisher_reverse <- 
     fisher_if_bad(tester2, "mr_significant", bad_events_reverse_separation$event)
+
+fisher_annotation <- function
 
 mrsig_plot2_df <- 
     revmrsig_res |>
