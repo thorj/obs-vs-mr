@@ -125,6 +125,27 @@ make_crossbar_plot <- function(plot_df, anno_df, background_df) {
         base_theme 
 }
 
+
+enrichment_by_event <- function(df, event) {
+    event_df <- 
+        df |> 
+        filter(event == {{ event }}) |> 
+        mutate(intail = as.integer(pval < 0.05/7288))
+    
+    enrichment_fit(df = event_df,
+                   independent_var = "intail", 
+                   response_var = "mr_significant", 
+                   event = event)
+}
+
+enrichment_fit <- function(df, independent_var, response_var, event) {
+    model_formula <- reformulate(termlabels = independent_var, response = response_var)
+    model <- glm(model_formula, data = df, family = binomial())
+    broom::tidy(model) |>
+        filter(term == {{ independent_var }}) |> 
+        mutate(term = {{ event }})
+}
+
 ## ============================================================
 ## TOP PANELS: MR significance (primary + secondary)
 ## ============================================================
@@ -157,21 +178,13 @@ tester <-
            mr_significant = if_else(obs_sig.mr2 + sec_analysis > 0, 1, 0)) |>
     ungroup()
 
-mrsig_res <-
-    lapply(tester$event |> unique(),
+mrsig_res_ <- 
+    lapply(X = tester$event |> unique(), 
            FUN = function(x) {
-               df <- tester |> 
-                   filter(event == {{ x }}) |> 
-                   mutate(intail = as.integer(pval < 0.05/7288))
-               m1 <- 
-                   glm(mr_significant ~ intail, data = df, family = binomial())
-               res <- 
-                   broom::tidy(m1) |>
-                   filter(term == "intail") |> 
-                   mutate(term = {{ x }})
-               return(res)
+               enrichment_by_event(df = tester, event = x)
            }) |> 
     data.table::rbindlist()
+
 
 fisher_test_on_bad <-
     tester |>
