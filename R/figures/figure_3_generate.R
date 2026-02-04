@@ -30,8 +30,6 @@ secondary_mr_summary <- readRDS(data_paths$secondary_mr_summary)
 secondary_mr_significant <- secondary_mr_summary$secondary_mr_significant
 
 cis_info <- readRDS(data_paths$cis_info)
-prop_w_cis <- cis_info$overall_cis_prop
-cis_df <- cis_info$bonferroni_with_cis
 has_cis <- cis_info$has_cis
 
 background_df <- data.frame(
@@ -124,7 +122,6 @@ make_crossbar_plot <- function(plot_df, background_df) {
         base_theme 
 }
 
-
 perform_enrichment_analysis <- function(df, order_df) {
     nested_df <- construct_enrichment_df(df)
     events <- nested_df$event
@@ -151,13 +148,27 @@ check_table_for_bad_sep <- function(tbl) {
 
 enrichment_analysis <- function(df, event) {
     event_df <- df |> filter(event == {{ event }})
-    if (event_df$include[1] == 0) {
+    if (event_df$totalsigs[1] == 0) {
+        enrichment_res <- no_significant_fit(event_df)
+    }
+    else if (event_df$include[1] == 0) {
         enrichment_res <- fisher_enrichment_fit(event_df)
     } else {
         event_df <- event_df |> select(data) |> unnest(cols = c(data))
         enrichment_res <- glm_enrichment_fit(df = event_df, event = {{ event }})
     }
     return(enrichment_res)
+}
+
+no_significant_fit <- function(df) {
+    tibble(
+        event = df$event[1],
+        estimate = NA,
+        std.error = NA,
+        statistic = NA,
+        p.value = NA,
+        method = "no_fit"
+    )
 }
 
 glm_enrichment_fit <- function(df, independent_var = "intail", response_var = "mr_significant", event) {
@@ -192,12 +203,20 @@ fisher_enrichment_fit <- function(df) {
 
 enrichment_annotation <- function(df, order_df) {
     df |>
-        mutate(estimate2 = if_else(method == "fisher", -Inf, estimate),
+        mutate(estimate2 = 
+                   case_when(
+                       method == "fisher" ~ -Inf, 
+                       method == "no_fit" ~ -Inf,
+                       method == "glm" ~ estimate,
+                       .default = NA),
                conf.low = estimate2 - 1.96 * std.error,
                conf.high = estimate2 + 1.96 * std.error,
-               label = if_else(method == "fisher", 
-                               paste0("FET P-value: ", round(p.value, 2)),
-                               NA),
+               label = 
+                   case_when(
+                       method == "fisher" ~ paste0("FET P-value: ", round(p.value, 2)),
+                       method == "no_fit" ~ "No significant hits",
+                       method == "glm" ~ "",
+                       .default = "ERROR"),
                sig = if_else(p.value < 0.05, 1, 0),
                sig = factor(sig, 
                             levels = c(0, 1), 
@@ -258,7 +277,7 @@ rev_mr_obs <-
     ungroup() |>
     select(event, somamer, prim_rev_sig)
 
-tester2 <-
+reverse_df <-
     obs |>
     left_join(rev_mr_obs, by = join_by("event", "somamer")) |>
     mutate(prim_rev_sig2 = if_else(is.na(prim_rev_sig), 0, prim_rev_sig)) |>
@@ -266,104 +285,11 @@ tester2 <-
     mutate(mrfdr = p.adjust(pval.rev.mr, "fdr", n()),
            sec_analysis = as.integer(mrfdr < 0.05),
            mr_significant = if_else(prim_rev_sig2  + sec_analysis > 0, 1, 0),
-           intail = as.integer(p.bon < 0.05)) |>
-    group_nest() |>
-    mutate(tabx = map(data, ~table(.x$mr_significant, .x$intail)),
-           totalsigs = map_dbl(data, ~sum(.x$mr_significant)),
-           any_bad_sep = map_dbl(tabx, check_table_for_bad_sep),
-           include = if_else(totalsigs == 0 | any_bad_sep > 0, 0, 1))
+           intail = as.integer(p.bon < 0.05))
 
-
-bad_events_reverse_base <- 
-    tester2 |>
-    mutate(intail = as.integer(p.bon < 0.05)) |>
-    group_by(event) |>
-    group_nest() |>
-    mutate(tabx = map(data, ~table(.x$mr_significant, .x$intail)),
-           totalsigs = map_dbl(data, ~sum(.x$mr_significant)),
-           any_bad_sep = map_dbl(tabx, check_table_for_bad_sep),
-           include = if_else(totalsigs == 0 | any_bad_sep > 0, 0, 1))
-
-bad_events_reverse_no_significant <- 
-    bad_events_reverse_base |>
-    filter(totalsigs == 0)
-
-bad_events_reverse_separation <-
-    bad_events_reverse_base |>
-    filter(any_bad_sep > 0)
-
-good_events <- bad_events_reverse_base$event[bad_events_reverse_base$include == 1]
-
-revmrsig_res_ <- 
-    lapply(X = good_events, 
-           FUN = function(x) {
-               enrichment_by_event(df = tester2, event = x)
-           }) |> 
-    data.table::rbindlist()
-
-fisher_reverse <- 
-    fisher_if_bad(tester2, "mr_significant", bad_events_reverse_separation$event)
-
-fisher_annotation <- function
-
-mrsig_plot2_df <- 
-    revmrsig_res |>
-    mutate(include = if_else(wmsg == 1 | abs(estimate) > 10, 0, 1),
-           estimate2 = if_else(include == 0, NA, estimate), 
-           conf.low = estimate2 - 1.96 * std.error,
-           conf.high = estimate2 + 1.96 * std.error) |>
-    rename(event = term) |>
-    inner_join(primary_mr_significant |> select(order, event, phenotype, trait), by = join_by("event")) |>
-    arrange(order) |>
-    mutate(sig = if_else(p.value < 0.05, 1, 0),
-           sig = factor(sig, levels = c(0, 1), labels = c("P ≥ 0.05", "P < 0.05")))
-
-## Eight phenotypes are annoying need to fix explicitly 
-
-tester2 |>
-    filter(event %in% mrsig_plot2_df$event[mrsig_plot2_df$include == 0]) |>
-    mutate(intail = as.integer(p.bon < 0.05)) |>
-    group_by(event) |>
-    summarize(a = sum(mr_significant))
-
-tmptmp <- 
-    tester2 |>
-    filter(event %in% mrsig_plot2_df$event[mrsig_plot2_df$include == 0]) |>
-    mutate(intail = as.integer(p.bon < 0.05)) |>
-    group_by(event) |>
-    group_nest() |>
-    mutate(tabx = map(data, ~table(.x$mr_significant, .x$intail)),
-           totalsigs = map_dbl(data, ~sum(.x$mr_significant)))
-
-
-fisher_secanal <-
-    tmptmp |>
-    filter(totalsigs > 0) |>
-    mutate(fisher = map(tabx, fisher.test),
-           fisher_p = map_dbl(fisher, "p.value"),
-           fisher_estimate = map_dbl(fisher, "estimate")) |>
-    select(event, fisher_p, fisher_estimate)
-
-mrsig_plot2_df |>
-    filter(include == 0) |>
-    mutate(note = 
-               case_when(
-                   event %in% fisher_secanal$event ~ "Tested with Fisher's exact test",
-                   TRUE ~ "No significant hits"
-               ))
-
-fisher_secanno <-
-    mrsig_plot2_df |>
-    filter(include == 0) |>
-    mutate(estimate2 = -Inf) |>
-    select(estimate2, event)  |>
-    left_join(fisher_secanal) |>
-    inner_join(primary_mr_significant |> select(order, event, phenotype, trait), by = join_by("event")) |>
-    mutate(pp = round(fisher_p, 2),
-           label = if_else(is.na(fisher_p),
-                           "No significant hits",
-                           paste0("FET P-value: ", pp))) |>
-    select(event, order, trait, label, estimate2)
+reverse_enrich <-
+    perform_enrichment_analysis(df = reverse_df, 
+                                order_df = primary_mr_significant)
 
 ## ============================================================
 ## LOWER PANELS: enrichment of MR significance in observational tail
@@ -373,8 +299,7 @@ mrsig_plot <-
     make_crossbar_plot(plot_df = forward_enrich, 
                        background_df = background_df)
 mrsig_2 <-
-    make_crossbar_plot(plot_df = mrsig_plot2_df, 
-                       anno_df = fisher_secanno, 
+    make_crossbar_plot(plot_df = reverse_enrich, 
                        background_df = background_df)
 
 ## ============================================================
