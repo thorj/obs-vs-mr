@@ -5,27 +5,35 @@ library(Cairo)
 box::use(data.table[fread, fwrite])
 source("R/utils.R")
 
-### CONST
+## Constants
 other_lty <- 0
+point_size <- 2
 
-### Load data
-f <- fread("data/phenotype_overview.csv")
-obs <- fread("data/observational_results_full.csv")
-h1 <- fread("data/primary_mr_overview.csv")
-group <- readRDS("data/stan_map_pheno_to_group.rds")
-protein_map <-readRDS("data/stan_map_soma_to_egs.rds")
-stan_data <- readRDS("data/stan_agreement_model_data.rds")
-bayes_res <- readRDS("data/model_base_fstat_total_coding_proteincorr.rds")
+## ============================================================
+## Load data
+## ============================================================
+f <- fread(data_paths$phenotype_overview)
+obs <- fread(data_paths$observational_full)
+h1 <- fread(data_paths$primary_mr_overview)
+group <- readRDS(data_paths$group_map)
+protein_map <-readRDS(data_paths$protein_map)
+stan_data <- readRDS(data_paths$stan_data)
+bayes_res <- readRDS(data_paths$bayes_results)
+primary_mr_summary <- readRDS(data_paths$primary_mr_summary)
+primary_mr_agreement <- primary_mr_summary$primary_mr_agreement
+secondary_mr_summary <- readRDS(data_paths$secondary_mr_summary)
+secondary_mr_agreement <- secondary_mr_summary$secondary_mr_agreement
 
+## ============================================================
+## Posterior extraction
+## ============================================================
 posterior_p <- 
     rstan::extract(bayes_res, 
                    pars = names(bayes_res)[grepl("^alpha$|alpha_p|gamma_g|beta_s|theta_f|theta_tc", names(bayes_res))])
 
-primary_mr_summary <- readRDS("data/reoccurring_data/primary_mr_summary.rds")
-primary_mr_agreement <- primary_mr_summary$primary_mr_agreement
-
-secondary_mr_summary <- readRDS("data/reoccurring_data/secondary_mr_summary.rds")
-secondary_mr_agreement <- secondary_mr_summary$secondary_mr_agreement
+## ============================================================
+## Helpers
+## ============================================================
 
 ## Helper function to get variable from posterior
 retrieve_post_col <- function(posterior, para, idx) {
@@ -78,25 +86,40 @@ compute_tilde_q_p_full <- function(posterior, group_vec, L, P, input_data) {
     colnames(tilde_q_p) <- paste0("phenotype_", 1:P)
     return(tilde_q_p)
 }
-
-#compute_tilde_q_p_full(posterior_p, group$groupf, L = 10, P = stan_data$P, input_data = h1)
+## ============================================================
+## Compute predicted agreement per phenotype
+## ============================================================
 q_t_p <- compute_tilde_q_p_full(posterior_p, 
                                 group$groupf, 
                                 L = 10000, 
                                 P = stan_data$P, 
                                 input_data = h1)
 
+q_summary <- 
+    data.frame(phenotype_id = 1:ncol(q_t_p), 
+                        m = apply(q_t_p, MARGIN = 2, median),
+                        q025 = apply(q_t_p, MARGIN = 2, quantile, probs = 0.025),
+                        q975 = apply(q_t_p, MARGIN = 2, quantile, probs = 0.975))
+
+global_mean <- rowMeans(q_t_p) |> median()
+global_q95 <- rowMeans(q_t_p) |> quantile(c(0.025, 0.975))
+
+qt_area <- data.frame(order2 = c(0.5, 22))
+
+## ============================================================
+## Assemble plotting data frame
+## ============================================================
+
 q_t_p_df <- 
     h1 |> 
     group_by(phenotype_id, event, groupf) |> 
     count() |> 
     select(-n) |>
-    inner_join(f |> filter(N > 0) |> mutate(r = Y/N), 
-               by = join_by("event")) |>  ### careful... any f |> filter(N > 0) might be wrong after update
-    inner_join(data.frame(phenotype_id = 1:21, 
-                          m = apply(q_t_p, MARGIN = 2, median),
-                          q025 = apply(q_t_p, MARGIN = 2, quantile, probs = 0.025),
-                          q975 = apply(q_t_p, MARGIN = 2, quantile, probs = 0.975)),
+    inner_join(f |> 
+                   filter(N > 0) |> 
+                   mutate(r = Y/N), 
+               by = join_by("event")) |> 
+    inner_join(q_summary,
                by = join_by(phenotype_id)) |>
     arrange(m) |>
     ungroup() |>
@@ -107,18 +130,15 @@ q_t_p_df <-
             select(event, r_no_obs),
         by = join_by(event)
     ) |>
-    inner_join(primary_mr_agreement |> select(event, order2 = order),
-               by = join_by(event)) |>
+    inner_join(primary_mr_agreement |> 
+                   select(event, order2 = order),
+               by = join_by(event)
+    ) |>
     arrange(order2)
 
-
-global_mean <- rowMeans(q_t_p) |> median()
-global_q95 <- rowMeans(q_t_p) |> quantile(c(0.025, 0.975))
-
-qt_area <- 
-    data.frame(order2 = c(0.5, 22))
-
-point_size <- 2
+## ============================================================
+## Plot: agreement ratios
+## ============================================================
 
 hibayes_plt <- 
     q_t_p_df |>
@@ -148,10 +168,11 @@ hibayes_plt <-
     theme(axis.title = element_text(face = "bold"), legend.position = "bottom") +
     coord_flip()
 
-#### Posterior density
-## Start with posterior distribution of tc
-tc_med <- posterior_p$theta_tc |> median()
+## ============================================================
+## Plot: posterior density for theta_tc
+## ============================================================
 
+tc_med <- posterior_p$theta_tc |> median()
 ci <- posterior_p$theta_tc |> quantile(probs = c(0.025, 0.975))
 
 dens <- density(posterior_p$theta_tc)
@@ -159,18 +180,13 @@ dens_df <- tibble(x = dens$x, y = dens$y)
 
 tc_post <- 
     ggplot(dens_df, aes(x = x, y = y)) +
-    # Shade left tail
     geom_area(data = filter(dens_df, x <= ci[1]),
               aes(x = x, y = y), fill = "gray80", alpha = 0.6) +
-    # Shade 95% CI region
     geom_area(data = filter(dens_df, x >= ci[1], x <= ci[2]),
               aes(x = x, y = y), fill = "#648FFF", alpha = 0.6) +
-    # Shade right tail
     geom_area(data = filter(dens_df, x >= ci[2]),
               aes(x = x, y = y), fill = "gray80", alpha = 0.6) +
-    # Density line
     geom_line(color = "black") +
-    # Reference line at 0
     geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
     geom_vline(xintercept = tc_med, linetype = "dotted", color = "red", linewidth = 1.2) +
     labs(
@@ -181,6 +197,9 @@ tc_post <-
     theme_bw(base_size = 12) +
     theme(axis.title = element_text(face = "bold"))
 
+## ============================================================
+## Combine + export
+## ============================================================
 
 agreement_plots <-
     free(tc_post, side = "l") + hibayes_plt +

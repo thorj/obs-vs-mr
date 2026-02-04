@@ -1,3 +1,15 @@
+data_paths <- list(
+    phenotype_overview = "data/phenotype_overview.csv",
+    observational_full = "data/observational_results_full.csv",
+    primary_mr_overview = "data/primary_mr_overview.csv",
+    group_map = "data/stan_map_pheno_to_group.rds",
+    protein_map = "data/stan_map_soma_to_egs.rds",
+    stan_data = "data/stan_agreement_model_data.rds",
+    bayes_results = "data/model_base_fstat_total_coding_proteincorr.rds",
+    primary_mr_summary = "data/reoccurring_data/primary_mr_summary.rds",
+    secondary_mr_summary = "data/reoccurring_data/secondary_mr_summary.rds",
+    cis_info = "data/reoccurring_data/cis_protein_data.rds"
+)
 
 export_image <- function(plot, fig_name, width, height, dpi = 300) {
     path <- 

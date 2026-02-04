@@ -1,7 +1,7 @@
 library(tidyverse)
 library(patchwork)
-source("R/utils.R")
 box::use(data.table[fread, fwrite])
+source("R/utils.R")
 
 ### Load data
 f <- fread("data/phenotype_overview.csv")
