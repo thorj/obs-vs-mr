@@ -29,3 +29,5 @@ create_folder_structure <- function() {
     }
     invisible(figures_path)
 }
+
+

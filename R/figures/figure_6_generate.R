@@ -188,7 +188,9 @@ agreement_plots <-
     theme(plot.tag.position = c(0, 1),
           plot.tag = element_text(size = 12, hjust = 0, vjust = 0))
 
-export_image(plot = agreement_plots, fig_name = "figure6_agreement_ratios_posterior", width = 18, height = 6, dpi = 300)
+export_image(plot = agreement_plots, 
+             fig_name = "figure6_agreement_ratios_posterior", 
+             width = 18, height = 6, dpi = 300)
 
 #fwrite(x = q_t_p_df, file = "tables/raw-tables/predicted_ratios_phenotypes.csv")
 
