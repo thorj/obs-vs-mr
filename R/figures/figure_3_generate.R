@@ -85,7 +85,7 @@ crossbar_guides <- function() {
     )
 }
 
-make_crossbar_plot <- function(plot_df, anno_df, background_df) {
+make_crossbar_plot <- function(plot_df, background_df) {
     plot_df |>
         ggplot(aes(x = order, y = estimate2)) +
         geom_rect(data = background_df, 
@@ -105,8 +105,7 @@ make_crossbar_plot <- function(plot_df, anno_df, background_df) {
                       alpha = 0.6) +
         geom_point(aes(shape = sig), size = 2) +
         geom_hline(yintercept = 0, lty = 2) +
-        geom_label(data = anno_df, 
-                   aes(label = label),
+        geom_label(aes(label = label),
                    hjust = -0.1, 
                    size = 2.5, 
                    alpha = 0.3, 
@@ -126,16 +125,39 @@ make_crossbar_plot <- function(plot_df, anno_df, background_df) {
 }
 
 
-enrichment_by_event <- function(df, event) {
-    event_df <- 
-        df |> 
-        filter(event == {{ event }}) |> 
-        mutate(intail = as.integer(pval < 0.05/7288))
-    
-    enrichment_fit(df = event_df,
-                   independent_var = "intail", 
-                   response_var = "mr_significant", 
-                   event = event)
+perform_enrichment_analysis <- function(df, order_df) {
+    nested_df <- construct_enrichment_df(df)
+    events <- nested_df$event
+    lapply(X = events, enrichment_analysis, df = nested_df) |>
+        data.table::rbindlist() |>
+        enrichment_annotation(order_df = order_df)
+}
+
+construct_enrichment_df <- function(df) {
+    df |> 
+        group_by(event) |>
+        group_nest() |>
+        mutate(tabx = map(data, ~table(.x$mr_significant, .x$intail)),
+               totalsigs = map_dbl(data, ~sum(.x$mr_significant)),
+               any_bad_sep = map_dbl(tabx, check_table_for_bad_sep),
+               include = if_else(totalsigs == 0 | any_bad_sep > 0, 0, 1))
+}
+
+## Bad events have either zero significant proteins OR zero cells in frequency table
+
+check_table_for_bad_sep <- function(tbl) {
+    sapply(X = tbl, FUN = function(x) { x == 0}) |> sum()
+}
+
+enrichment_analysis <- function(df, event) {
+    event_df <- df |> filter(event == {{ event }})
+    if (event_df$include[1] == 0) {
+        enrichment_res <- fisher_enrichment_fit(event_df)
+    } else {
+        event_df <- event_df |> select(data) |> unnest(cols = c(data))
+        enrichment_res <- glm_enrichment_fit(df = event_df, event = {{ event }})
+    }
+    return(enrichment_res)
 }
 
 glm_enrichment_fit <- function(df, independent_var = "intail", response_var = "mr_significant", event) {
@@ -168,10 +190,23 @@ fisher_enrichment_fit <- function(df) {
         )
 }
 
-## Bad events have either zero significant proteins OR zero cells in frequency table
-
-check_table_for_bad_sep <- function(tbl) {
-    sapply(X = tbl, FUN = function(x) { x == 0}) |> sum()
+enrichment_annotation <- function(df, order_df) {
+    df |>
+        mutate(estimate2 = if_else(method == "fisher", -Inf, estimate),
+               conf.low = estimate2 - 1.96 * std.error,
+               conf.high = estimate2 + 1.96 * std.error,
+               label = if_else(method == "fisher", 
+                               paste0("FET P-value: ", round(p.value, 2)),
+                               NA),
+               sig = if_else(p.value < 0.05, 1, 0),
+               sig = factor(sig, 
+                            levels = c(0, 1), 
+                            labels = c("P ≥ 0.05", "P < 0.05"))
+        ) |>
+        inner_join(order_df |>
+                       select(order, event, phenotype, trait), 
+                   by = join_by("event")) |>
+        arrange(order) 
 }
 
 ## ============================================================
@@ -206,101 +241,10 @@ forward_df <-
            mr_significant = if_else(obs_sig.mr2 + sec_analysis > 0, 1, 0),
            intail = as.integer(p.bon < 0.05))
 
+forward_enrich <-
+    perform_enrichment_analysis(df = forward_df, 
+                                order_df = primary_mr_significant)
 
-perform_enrichment_analysis <- function(df, order_df) {
-    nested_df <- construct_enrichment_df(df)
-    events <- nested_df$event
-    lapply(X = events, enrichment_analysis, df = nested_df) |>
-        data.table::rbindlist() |>
-        inner_join(order_df |>
-                       select(order, event, phenotype, trait), 
-                   by = join_by("event")) |>
-        arrange(order) 
-}
-
-construct_enrichment_df <- function(df) {
-        df |> 
-        group_by(event) |>
-        group_nest() |>
-        mutate(tabx = map(data, ~table(.x$mr_significant, .x$intail)),
-               totalsigs = map_dbl(data, ~sum(.x$mr_significant)),
-               any_bad_sep = map_dbl(tabx, check_table_for_bad_sep),
-               include = if_else(totalsigs == 0 | any_bad_sep > 0, 0, 1))
-}
-
-enrichment_analysis <- function(df, event) {
-    event_df <- df |> filter(event == {{ event }})
-    if (event_df$include[1] == 0) {
-        enrichment_res <- fisher_enrichment_fit(event_df)
-    } else {
-        event_df <- event_df |> select(data) |> unnest(cols = c(data))
-        enrichment_res <- glm_enrichment_fit(df = event_df, event = {{ event }})
-    }
-    return(enrichment_annotation(enrichment_res))
-}
-
-enrichment_annotation <- function(df) {
-    df |>
-        mutate(estimate2 = if_else(method == "fisher", -Inf, estimate),
-               conf.low = estimate2 - 1.96 * std.error,
-               conf.high = estimate2 + 1.96 * std.error,
-               label = if_else(method == "fisher", 
-                               paste0("FET P-value: ", round(p.value, 2)),
-                               ""),
-               sig = if_else(p.value < 0.05, 1, 0),
-               sig = factor(sig, 
-                            levels = c(0, 1), 
-                            labels = c("P ≥ 0.05", "P < 0.05"))
-        )
-}
-
-perform_enrichment_analysis(forward_df, order_df = primary_mr_significant)
-
-bork <- construct_enrichment_df(forward_df)
-
-enrichment_analysis(bork, "a2dm2")
-
-
-mrsig_res_ <- 
-    lapply(X = forward_df$event |> unique(), 
-           FUN = function(x) {
-               enrichment_by_event(df = tester, event = x)
-           }) |> 
-    data.table::rbindlist()
-
-bad_events_forward <- mrsig_res |> filter(std.error > 5) |> pull(term)
-
-fisher_forward <- 
-    fisher_if_bad(tester, "mr_significant", bad_events_forward)
-
-fisher_anno <-
-    mrsig_res |>
-    filter(std.error > 5) |>
-    mutate(estimate2 = -Inf,
-           event = term) |>
-    select(term, estimate2, event)  |>
-    inner_join(fisher_test_on_bad |> select(-fisher_est)) |>
-    inner_join(primary_mr_significant |> 
-                   select(order, event, phenotype, trait), 
-               by = join_by("event")) |>
-    mutate(pp = round(fisher_p, 2),
-           label = paste0("FET P-value: ", pp)) |>
-    select(event, order, trait, label, estimate2)
-
-mrsig_df <-
-    mrsig_res |>
-    mutate(estimate2 = if_else(std.error > 5, NA, estimate),
-           conf.low = estimate2 - 1.96 * std.error,
-           conf.high = estimate2 + 1.96 * std.error) |>
-    rename(event = term) |>
-    inner_join(primary_mr_significant |>
-                   select(order, event, phenotype, trait), 
-               by = join_by("event")) |>
-    arrange(order) |>
-    mutate(sig = if_else(p.value < 0.05, 1, 0),
-           sig = factor(sig, 
-                        levels = c(0, 1), 
-                        labels = c("P ≥ 0.05", "P < 0.05")))
 
 ### REVERSE
 
@@ -426,8 +370,7 @@ fisher_secanno <-
 ## ============================================================
 
 mrsig_plot <- 
-    make_crossbar_plot(plot_df = mrsig_df, 
-                       anno_df = fisher_anno, 
+    make_crossbar_plot(plot_df = forward_enrich, 
                        background_df = background_df)
 mrsig_2 <-
     make_crossbar_plot(plot_df = mrsig_plot2_df, 
