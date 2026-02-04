@@ -63,65 +63,6 @@ make_mr_barplot <- function(df, ylims, y_breaks) {
         base_theme
 }
 
-crossbar_guides <- function() {
-    guides(
-        fill = guide_legend(
-            nrow = 2, order = 1, title = "",
-            theme = theme(legend.key.spacing.y = unit(0, "cm"),
-                          legend.margin = margin())
-        ),
-        shape = guide_legend(
-            nrow = 2, order = 2, title = "",
-            theme = theme(legend.key.spacing.y = unit(0, "cm"),
-                          legend.margin = margin())
-        ),
-        linetype = guide_legend(
-            nrow = 2, order = 1, title = "",
-            theme = theme(legend.key.spacing.y = unit(0, "cm"),
-                          legend.margin = margin())
-        )
-    )
-}
-
-make_crossbar_plot <- function(plot_df, background_df) {
-    plot_df |>
-        ggplot(aes(x = order, y = estimate2)) +
-        geom_rect(data = background_df, 
-                  aes(xmin = xmin, xmax = xmax, 
-                      ymin = ymin, ymax = ymax,), 
-                  fill = background_df$fill,
-                  alpha = 0.5, 
-                  inherit.aes = F, 
-                  show.legend = F
-        ) +
-        geom_crossbar(aes(ymin = conf.low, 
-                          ymax = conf.high, 
-                          fill = trait,
-                          linetype = trait), 
-                      middle.linetype = "blank",
-                      width = 0.6, 
-                      alpha = 0.6) +
-        geom_point(aes(shape = sig), size = 2) +
-        geom_hline(yintercept = 0, lty = 2) +
-        geom_label(aes(label = label),
-                   hjust = -0.1, 
-                   size = 2.5, 
-                   alpha = 0.3, 
-                   linewidth = 0.3) +
-        scale_y_continuous(labels = scales::number, 
-                           breaks = scales::pretty_breaks(n = 7)) +
-        scale_x_discrete(labels = plot_df$phenotype) +
-        scale_fill_manual(values = crossbar_fill, drop = T) +
-        scale_shape_manual(values = c("P ≥ 0.05" = 1, "P < 0.05" = 16)) +
-        scale_linetype_manual(values = c("Disease" = 1, "Risk factor" = other_lty)) + 
-        coord_flip() +
-        crossbar_guides() +
-        labs(x = "", 
-             y = "Log-odds ratio", 
-             linetype = "") +
-        base_theme 
-}
-
 perform_enrichment_analysis <- function(df, order_df) {
     nested_df <- construct_enrichment_df(df)
     events <- nested_df$event
@@ -228,6 +169,67 @@ enrichment_annotation <- function(df, order_df) {
         arrange(order) 
 }
 
+crossbar_guides <- function() {
+    guides(
+        fill = guide_legend(
+            nrow = 2, order = 1, title = "",
+            theme = theme(legend.key.spacing.y = unit(0, "cm"),
+                          legend.margin = margin())
+        ),
+        shape = guide_legend(
+            nrow = 2, order = 2, title = "",
+            theme = theme(legend.key.spacing.y = unit(0, "cm"),
+                          legend.margin = margin())
+        ),
+        linetype = guide_legend(
+            nrow = 2, order = 1, title = "",
+            theme = theme(legend.key.spacing.y = unit(0, "cm"),
+                          legend.margin = margin())
+        )
+    )
+}
+
+make_crossbar_plot <- function(plot_df, background_df) {
+    plot_df |>
+        ggplot(aes(x = order, y = estimate2)) +
+        geom_rect(data = background_df, 
+                  aes(xmin = xmin, xmax = xmax, 
+                      ymin = ymin, ymax = ymax,), 
+                  fill = background_df$fill,
+                  alpha = 0.5, 
+                  inherit.aes = F, 
+                  show.legend = F
+        ) +
+        geom_crossbar(aes(ymin = conf.low, 
+                          ymax = conf.high, 
+                          fill = trait,
+                          linetype = trait), 
+                      middle.linetype = "blank",
+                      width = 0.6, 
+                      alpha = 0.6) +
+        geom_point(data = plot_df |> filter(method == "glm"),
+                   aes(shape = sig), size = 2) +
+        geom_hline(yintercept = 0, lty = 2) +
+        geom_label(data = plot_df |> filter(method != "glm"),
+                   aes(label = label),
+                   hjust = -0.1, 
+                   size = 2.5, 
+                   alpha = 0.3, 
+                   linewidth = 0.3) +
+        scale_y_continuous(labels = scales::number, 
+                           breaks = scales::pretty_breaks(n = 7)) +
+        scale_x_discrete(labels = plot_df$phenotype) +
+        scale_fill_manual(values = crossbar_fill, drop = T) +
+        scale_shape_manual(values = c("P ≥ 0.05" = 1, "P < 0.05" = 16), drop = T) +
+        scale_linetype_manual(values = c("Disease" = 1, "Risk factor" = other_lty), drop = T) + 
+        coord_flip() +
+        crossbar_guides() +
+        labs(x = "", 
+             y = "Log-odds ratio", 
+             linetype = "") +
+        base_theme 
+}
+
 ## ============================================================
 ## TOP PANELS: MR significance (primary + secondary)
 ## ============================================================
@@ -263,7 +265,6 @@ forward_df <-
 forward_enrich <-
     perform_enrichment_analysis(df = forward_df, 
                                 order_df = primary_mr_significant)
-
 
 ### REVERSE
 
